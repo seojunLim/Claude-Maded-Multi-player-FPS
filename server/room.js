@@ -16,6 +16,7 @@ import {
   MSG,
   EV,
   KEY,
+  MOVE_UNIT,
   MATCH_STATE,
   TEAMS,
   FALL_DAMAGE_SPEED,
@@ -293,6 +294,10 @@ export class Room {
         keys: c[1] | 0,
         yaw: clampNum(c[2]),
         pitch: Math.max(-1.54, Math.min(1.54, clampNum(c[3]))),
+        // Optional analog stick from touch controls, clamped to the same
+        // integer range the client quantised to.
+        mx: clampUnit(c[4]),
+        mz: clampUnit(c[5]),
       });
     }
     if (p.cmds.length > MAX_QUEUED_COMMANDS) {
@@ -755,6 +760,12 @@ export class Room {
       });
     }
   }
+}
+
+function clampUnit(v) {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(-MOVE_UNIT, Math.min(MOVE_UNIT, n));
 }
 
 function clampNum(v) {

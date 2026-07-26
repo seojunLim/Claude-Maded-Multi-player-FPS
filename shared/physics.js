@@ -3,6 +3,7 @@
 
 import {
   KEY,
+  MOVE_UNIT,
   GRAVITY,
   JUMP_SPEED,
   GROUND_ACCEL,
@@ -158,8 +159,12 @@ function applyFriction(state, dt) {
  * caller may act on (landing impact for fall damage).
  *
  * state: { x,y,z, vx,vy,vz, onGround, crouching }
- * cmd:   { keys, yaw }
+ * cmd:   { keys, yaw, mx?, mz? }
  * mods:  { speed, speedMult }
+ *
+ * `mx`/`mz` carry an analog stick as integers in [-MOVE_UNIT, MOVE_UNIT]
+ * (touch controls). They are quantised on the wire so the client and the server
+ * derive the exact same direction. When absent, the key bits are used.
  */
 export function stepPlayer(state, cmd, world, dt, mods = {}) {
   const keys = cmd.keys | 0;
@@ -176,13 +181,23 @@ export function stepPlayer(state, cmd, world, dt, mods = {}) {
   }
   const height = playerHeight(state.crouching);
 
-  // Desired direction in world space.
+  // Desired direction in local space: -z is forward, +x is right.
   let fx = 0;
   let fz = 0;
-  if (keys & KEY.FORWARD) fz -= 1;
-  if (keys & KEY.BACK) fz += 1;
-  if (keys & KEY.LEFT) fx -= 1;
-  if (keys & KEY.RIGHT) fx += 1;
+  let throttle = 1;
+  const ax = cmd.mx | 0;
+  const az = cmd.mz | 0;
+  if (ax !== 0 || az !== 0) {
+    fx = ax / MOVE_UNIT;
+    fz = az / MOVE_UNIT;
+    // A partly pushed stick walks slowly; a fully pushed one runs.
+    throttle = Math.min(1, Math.hypot(fx, fz));
+  } else {
+    if (keys & KEY.FORWARD) fz -= 1;
+    if (keys & KEY.BACK) fz += 1;
+    if (keys & KEY.LEFT) fx -= 1;
+    if (keys & KEY.RIGHT) fx += 1;
+  }
   const len = Math.hypot(fx, fz);
   let dirX = 0;
   let dirZ = 0;
@@ -198,8 +213,10 @@ export function stepPlayer(state, cmd, world, dt, mods = {}) {
     dirZ = fx * -sin + fz * cos;
   }
 
-  let speed = baseSpeed * (mods.speedMult || 1);
-  const sprinting = !!(keys & KEY.SPRINT) && !state.crouching && (keys & KEY.FORWARD) && !(keys & KEY.ZOOM);
+  let speed = baseSpeed * (mods.speedMult || 1) * throttle;
+  // Sprinting needs the stick (or the key) pointing roughly forwards.
+  const forwards = len > 0 && fz < -0.45;
+  const sprinting = !!(keys & KEY.SPRINT) && !state.crouching && forwards && !(keys & KEY.ZOOM);
   if (sprinting) speed *= SPRINT_MULT;
   if (state.crouching) speed *= CROUCH_MULT;
   if (keys & KEY.ZOOM) speed *= 0.55;

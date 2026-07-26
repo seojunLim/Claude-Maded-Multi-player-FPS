@@ -221,7 +221,10 @@ export class Stage {
       powerPreference: 'high-performance',
       stencil: false,
     });
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
+    // Phone GPUs cannot afford a 3x device pixel ratio, and shadow maps are the
+    // single most expensive thing here, so both are scaled back on touch.
+    this.mobile = !!opts.mobile;
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, this.mobile ? 1.5 : 2));
     this.renderer.shadowMap.enabled = opts.shadows !== false;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -263,7 +266,7 @@ export class Stage {
     const sun = new THREE.DirectionalLight(0xfff2dc, 1.35);
     sun.position.set(58, 96, 44);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(this.mobile ? 1024 : 2048, this.mobile ? 1024 : 2048);
     const s = 62;
     sun.shadow.camera.left = -s;
     sun.shadow.camera.right = s;

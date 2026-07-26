@@ -74,6 +74,7 @@
           <div id="respawnring"><span id="respawnnum">5</span></div>
           <div class="dead-hint">부활 대기 중 — 영웅을 교체할 수 있습니다</div>
           <div id="deadheroes"></div>
+          <button id="respawnbtn" type="button">부활</button>
         </div>
       </div>
 
@@ -104,10 +105,42 @@
         </div>
       </div>
 
-      <div id="chatinput" class="hidden"><span>전체</span><input id="chatfield" maxlength="120" autocomplete="off" /></div>
+      <div id="chatinput" class="hidden">
+        <span>전체</span>
+        <input id="chatfield" maxlength="120" autocomplete="off" enterkeyhint="send" />
+        <button id="chatsend" type="button">전송</button>
+      </div>
 
       <div id="stats"><span id="fps">60 FPS</span><span id="pingtag">0 ms</span></div>
       <div id="lockhint" class="hidden">클릭하여 조준 시작</div>
+
+      <!-- ─────────────────── 터치 조작 (모바일/태블릿) ─────────────────── -->
+      <div id="touch" class="hidden">
+        <div id="tlook"></div>
+        <div id="tstickzone"></div>
+        <div id="tstick"><i id="tknob"></i></div>
+        <div id="tright">
+          <button class="tbtn fire" data-act="fire" type="button">발사</button>
+          <div class="trow">
+            <button class="tbtn" data-act="ability" type="button">스킬</button>
+            <button class="tbtn" data-act="jump" type="button">점프</button>
+          </div>
+          <div class="trow">
+            <button class="tbtn" data-act="zoom" data-toggle="1" type="button">조준</button>
+            <button class="tbtn" data-act="reload" type="button">장전</button>
+            <button class="tbtn" data-act="crouch" data-toggle="1" type="button">앉기</button>
+          </div>
+        </div>
+        <div id="tsmall">
+          <button class="tbtn small" data-act="scoreboard" data-toggle="1" type="button">순위</button>
+          <button class="tbtn small" data-act="chat" data-toggle="1" type="button">채팅</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="rotate" class="hidden">
+      <div class="rot-icon">▭</div>
+      <p>화면을 <b>가로</b>로 돌려주세요</p>
     </div>
 
     <!-- ───────────────────────────── 메뉴 ───────────────────────────── -->
@@ -135,8 +168,8 @@
           <div id="heroes"></div>
 
           <div class="row settings">
-            <label class="slider">
-              <span>마우스 감도 <b id="sensval">1.00</b></span>
+            <label class="slider" id="senswrap">
+              <span><i class="sens-label">마우스 감도</i> <b id="sensval">1.00</b></span>
               <input id="sens" type="range" min="0.2" max="3" step="0.05" value="1" />
             </label>
             <label class="slider">
@@ -145,6 +178,7 @@
             </label>
             <label class="check"><input id="invertY" type="checkbox" /><span>Y축 반전</span></label>
             <label class="check"><input id="shadows" type="checkbox" checked /><span>그림자</span></label>
+            <label class="check touch-only"><input id="autofire" type="checkbox" checked /><span>자동 사격</span></label>
           </div>
 
           <button id="play">전투 참가</button>
@@ -154,12 +188,20 @@
         <div class="cols">
           <div class="card">
             <h3>조작</h3>
-            <ul class="keys">
+            <ul class="keys" id="keyhelp-pc">
               <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 이동</li>
               <li><kbd>Shift</kbd> 달리기 · <kbd>Ctrl</kbd> 앉기 · <kbd>Space</kbd> 점프</li>
               <li><kbd>좌클릭</kbd> 사격 · <kbd>우클릭</kbd> 조준 · <kbd>R</kbd> 재장전</li>
               <li><kbd>Q</kbd> 영웅 스킬 · <kbd>Tab</kbd> 스코어보드</li>
               <li><kbd>Enter</kbd> 채팅 · <kbd>Esc</kbd> 마우스 해제</li>
+            </ul>
+            <ul class="keys hidden" id="keyhelp-touch">
+              <li><b>왼쪽 스틱</b> 이동 — 끝까지 밀면 달리기</li>
+              <li><b>화면 드래그</b> 조준 · <b>화면 탭</b> 단발 사격</li>
+              <li><b>발사 / 조준 / 점프</b> 오른쪽 버튼</li>
+              <li><b>장전 · 스킬 · 앉기</b> 오른쪽 아래 버튼</li>
+              <li><b>순위 · 채팅</b> 왼쪽 위 버튼</li>
+              <li>조준 보정과 자동 사격이 켜져 있습니다</li>
             </ul>
           </div>
           <div class="card">

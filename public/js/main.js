@@ -6,14 +6,31 @@ import { Input } from './input.js';
 import { Sfx } from './audio.js';
 import { Hud } from './hud.js';
 import { Game } from './game.js';
+import { TouchControls, looksLikeTouchDevice, hasTouchSupport } from './touch.js';
 
 const $ = (id) => document.getElementById(id);
-const STORE = 'sanctum.settings.v1';
+const STORE = 'sanctum.settings.v2';
 
-const settings = Object.assign(
-  { name: '', hero: 'ranger', room: '', sens: 1, fov: 90, invertY: false, shadows: true },
-  loadSettings(),
-);
+// Phones and tablets start with on-screen controls, a narrower field of view
+// and cheaper rendering. Anything with a mouse starts in mouse mode; a device
+// that has both switches live depending on what the player uses.
+const TOUCH_DEVICE = looksLikeTouchDevice();
+const HAS_TOUCH = hasTouchSupport();
+
+const defaults = {
+  name: '',
+  hero: 'ranger',
+  room: '',
+  sens: 1,
+  fov: TOUCH_DEVICE ? 80 : 90,
+  invertY: false,
+  shadows: !TOUCH_DEVICE,
+  autoFire: true,
+  // Not user facing: tells the renderer to use a mobile budget.
+  mobile: TOUCH_DEVICE,
+};
+
+const settings = Object.assign(defaults, loadSettings(), { mobile: TOUCH_DEVICE });
 
 function loadSettings() {
   try {
@@ -75,6 +92,48 @@ function markHero() {
 
 /* --------------------------------------------------------------- controls */
 
+/** Applies device-specific labels, defaults and the rotate-your-phone hint. */
+function setUpDevice() {
+  document.body.classList.toggle('can-touch', HAS_TOUCH);
+  if (TOUCH_DEVICE) {
+    $('keyhelp-pc').classList.add('hidden');
+    $('keyhelp-touch').classList.remove('hidden');
+    document.querySelector('.sens-label').textContent = '조준 감도';
+    document.querySelector('.sb-foot').textContent = '순위 · 채팅 버튼은 화면 왼쪽 위에 있습니다';
+  }
+
+  // Landscape is close to mandatory in game: the controls live in the bottom
+  // corners. The menu itself scrolls fine in portrait, so only nag once the
+  // match has started.
+  const rotate = $('rotate');
+  const update = () => {
+    const portrait = window.innerHeight > window.innerWidth;
+    const inGame = $('menu').classList.contains('hidden');
+    rotate.classList.toggle('hidden', !(TOUCH_DEVICE && portrait && inGame));
+  };
+  window.addEventListener('resize', update);
+  window.addEventListener('orientationchange', () => setTimeout(update, 250));
+  update();
+  return update;
+}
+
+const updateOrientationHint = setUpDevice();
+
+/** Best-effort fullscreen + landscape lock; both are optional on iOS. */
+async function goImmersive() {
+  if (!TOUCH_DEVICE) return;
+  try {
+    await document.documentElement.requestFullscreen?.({ navigationUI: 'hide' });
+  } catch {
+    /* user or browser declined — the game still works */
+  }
+  try {
+    await screen.orientation?.lock?.('landscape');
+  } catch {
+    /* unsupported on iOS Safari; the rotate hint covers it */
+  }
+}
+
 function bindMenu() {
   const params = new URLSearchParams(location.search);
   const roomParam = params.get('room');
@@ -85,6 +144,7 @@ function bindMenu() {
   $('fov').value = settings.fov;
   $('invertY').checked = settings.invertY;
   $('shadows').checked = settings.shadows;
+  $('autofire').checked = settings.autoFire;
   $('sensval').textContent = Number(settings.sens).toFixed(2);
   $('fovval').textContent = settings.fov;
 
@@ -104,6 +164,10 @@ function bindMenu() {
   });
   $('shadows').addEventListener('change', (e) => {
     settings.shadows = e.target.checked;
+    saveSettings();
+  });
+  $('autofire').addEventListener('change', (e) => {
+    settings.autoFire = e.target.checked;
     saveSettings();
   });
 
@@ -153,7 +217,21 @@ async function startGame() {
   const canvas = $('scene');
   const net = new Net();
   const hud = new Hud();
-  const input = new Input(canvas, { sensitivity: settings.sens, invertY: settings.invertY });
+  const input = new Input(canvas, {
+    sensitivity: settings.sens,
+    touchSensitivity: settings.sens,
+    invertY: settings.invertY,
+  });
+
+  // The on-screen controls stay hidden until a finger actually touches the
+  // screen, so they never get in a mouse player's way.
+  const touch = new TouchControls($('touch'), input);
+  input.attachTouch(touch);
+  if (TOUCH_DEVICE) {
+    input.touchMode = true;
+    touch.enable();
+    goImmersive();
+  }
 
   $('loading').classList.remove('hidden');
   try {
@@ -170,6 +248,7 @@ async function startGame() {
     $('loading').classList.add('hidden');
     game.start();
     input.requestLock();
+    updateOrientationHint();
 
     net.on('close', () => {
       game?.stop();
@@ -179,6 +258,7 @@ async function startGame() {
       $('menu').classList.remove('hidden');
       $('menustatus').textContent = '서버와의 연결이 끊어졌습니다. 다시 참가해 주세요.';
       btn.disabled = false;
+      updateOrientationHint();
     });
 
     // Clicking the canvas re-captures the mouse after Esc.

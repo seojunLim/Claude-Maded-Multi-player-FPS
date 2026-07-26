@@ -15,7 +15,17 @@ import {
   TEAMS,
 } from '/shared/constants.js';
 import { buildMap } from '/shared/map.js';
-import { makeWorld, stepPlayer, lookDir, traceWorld, traceEntity, applySpread, mulberry32, eyeHeight } from '/shared/physics.js';
+import {
+  makeWorld,
+  stepPlayer,
+  lookDir,
+  traceWorld,
+  traceEntity,
+  applySpread,
+  mulberry32,
+  eyeHeight,
+  hasLineOfSight,
+} from '/shared/physics.js';
 import { getHero } from '/shared/heroes.js';
 import { Stage } from './world.js';
 import { Effects } from './effects.js';
@@ -40,7 +50,11 @@ export class Game {
     this.map = buildMap();
     this.world = makeWorld(this.map);
 
-    this.stage = new Stage(canvas, { fov: settings.fov, shadows: settings.shadows });
+    this.stage = new Stage(canvas, {
+      fov: settings.fov,
+      shadows: settings.shadows,
+      mobile: !!settings.mobile,
+    });
     this.stage.buildLevel(this.map);
     this.effects = new Effects(this.stage.scene);
     this.viewmodel = new ViewModel(this.stage.weaponScene, this.stage.camera);
@@ -61,6 +75,7 @@ export class Game {
     this.remote = new Map(); // id -> last interpolated state
     this.revealed = false;
     this.pings = new Map();
+    this.crosshairEnemy = 0;
 
     this.lastFireAt = 0;
     this.localSpread = getHero(this.heroId).weapon.spread;
@@ -138,8 +153,35 @@ export class Game {
 
     this.input.onLockChange = (locked) => {
       document.body.classList.toggle('playing', locked);
-      this.hud.setLockHint(!locked && !this.input.typing);
+      this.hud.setLockHint(!locked && !this.input.typing && !this.input.touchMode);
     };
+
+    // The on-screen buttons stand in for Tab and Enter.
+    this.input.onTouchUi = (what, on) => {
+      if (what === 'scoreboard') {
+        this.scoreboardOpen = on;
+        this.hud.toggleScoreboard(on);
+      } else if (what === 'chat') {
+        if (on) {
+          this.hud.openChat();
+          this.input.typing = true;
+        } else {
+          const text = this.hud.closeChat();
+          this.input.typing = false;
+          if (text) this.net.send({ t: MSG.CHAT, msg: text });
+        }
+      }
+    };
+    this.hud.onChatSend(() => {
+      const text = this.hud.closeChat();
+      this.input.typing = false;
+      this.hud.setChatButtonOff();
+      if (text) this.net.send({ t: MSG.CHAT, msg: text });
+    });
+
+    this.hud.onRespawn(() => {
+      if (this.me.rs <= 0) this.net.send({ t: MSG.RESPAWN, hero: this.pendingHero });
+    });
 
     this.hud.onHeroPick((heroId) => {
       this.pendingHero = heroId;
@@ -153,7 +195,7 @@ export class Game {
     this.hud.show();
     this.hud.setSelf(this.selfId, this.selfTeam);
     this.hud.setHero(this.heroId);
-    this.hud.setLockHint(!this.input.locked);
+    this.hud.setLockHint(!this.input.locked && !this.input.touchMode);
     this.loop();
   }
 
@@ -408,6 +450,10 @@ export class Game {
       this.fpsTime = 0;
     }
 
+    // Aim assist nudges the view before the commands for this frame are built.
+    this.updateAimAssist(frameDt);
+    this.crosshairEnemy = this.findCrosshairEnemy();
+
     // Fixed-step prediction so the client and server integrate identically.
     this.accumulator += frameDt;
     let steps = 0;
@@ -442,7 +488,17 @@ export class Game {
 
     if (!this.alive) return;
 
-    const cmd = { seq: ++this.seq, keys: this.input.bitmask, yaw, pitch };
+    // The analog stick is already quantised to integers, so the server derives
+    // the identical direction from the same numbers.
+    const stick = this.input.analog();
+    const cmd = {
+      seq: ++this.seq,
+      keys: this.input.bitmask,
+      yaw,
+      pitch,
+      mx: stick ? stick.mx : 0,
+      mz: stick ? stick.mz : 0,
+    };
     this.pending.push(cmd);
     if (this.pending.length > 90) this.pending.shift();
     this.unsent.push(cmd);
@@ -466,12 +522,64 @@ export class Game {
     if (!this.unsent.length) {
       return;
     }
-    const c = this.unsent.map((cmd) => [cmd.seq, cmd.keys, round4(cmd.yaw), round4(cmd.pitch)]);
+    // The analog pair is only appended when a stick is actually in use, so
+    // keyboard players keep sending the shorter four-element form.
+    const c = this.unsent.map((cmd) => {
+      const row = [cmd.seq, cmd.keys, round4(cmd.yaw), round4(cmd.pitch)];
+      if (cmd.mx || cmd.mz) row.push(cmd.mx, cmd.mz);
+      return row;
+    });
     this.unsent.length = 0;
     this.net.send({ t: MSG.COMMANDS, c, ping: Math.round(this.net.rtt) });
   }
 
   /* --------------------------------------------------------------- combat */
+
+  /**
+   * Console-style aim assist for touch play: a thumb on glass cannot track a
+   * moving target the way a mouse can, so the view is gently pulled towards an
+   * enemy near the crosshair and look sensitivity eases off while it does.
+   * Never runs for mouse players.
+   */
+  updateAimAssist(dt) {
+    const input = this.input;
+    if (!input.touchMode || !this.alive) {
+      input.aimAssist = 0;
+      return;
+    }
+    const eye = { x: this.self.x, y: this.self.y + this.eyeSmooth, z: this.self.z };
+    const dir = lookDir(input.yaw, input.pitch);
+    const CONE = Math.cos(0.14); // ~8 degrees
+    let best = null;
+    let bestDot = CONE;
+
+    for (const s of this.remote.values()) {
+      if (s.team === this.selfTeam || !s.alive) continue;
+      const tx = s.x - eye.x;
+      const ty = s.y + (s.crouching ? 0.85 : 1.15) - eye.y;
+      const tz = s.z - eye.z;
+      const dist = Math.hypot(tx, ty, tz);
+      if (dist < 1.5 || dist > 90) continue;
+      const dot = (tx * dir.x + ty * dir.y + tz * dir.z) / dist;
+      if (dot <= bestDot) continue;
+      if (!hasLineOfSight(this.world, eye, { x: s.x, y: s.y + 1.15, z: s.z })) continue;
+      bestDot = dot;
+      best = { x: tx / dist, y: ty / dist, z: tz / dist };
+    }
+
+    if (!best) {
+      input.aimAssist *= Math.max(0, 1 - dt * 6);
+      return;
+    }
+    // Stronger the closer the target already is to the centre of the screen.
+    const closeness = Math.min(1, (bestDot - CONE) / (1 - CONE));
+    input.aimAssist = closeness;
+    const wantYaw = Math.atan2(-best.x, -best.z);
+    const wantPitch = Math.asin(Math.max(-1, Math.min(1, best.y)));
+    const rate = Math.min(1, dt * 3.2 * closeness);
+    input.yaw = approachAngle(input.yaw, wantYaw, Math.abs(angleDelta(input.yaw, wantYaw)) * rate);
+    input.pitch += (wantPitch - input.pitch) * rate;
+  }
 
   updateWeapon(dt) {
     const hero = getHero(this.heroId);
@@ -501,17 +609,27 @@ export class Game {
 
     const reloading = this.me.rl > 0;
     const auto = w.kind === 'auto';
-    const wants = auto ? this.input.firing : this.input.firePressed;
+    // Touch players can let the weapon fire itself while an enemy is centred —
+    // holding a fire button and aiming with the same thumb is not realistic.
+    const autoFire =
+      this.settings.autoFire &&
+      this.input.touchMode &&
+      this.crosshairEnemy &&
+      this.input.aimAssist > 0.25;
+    // `firePressed` is latched on press, so a tap shorter than one frame still
+    // fires exactly once — important for touch, and for anyone on a low frame
+    // rate. Held automatics keep firing from `firing`.
+    const clicked = this.input.firePressed;
+    const wants = (auto ? this.input.firing || clicked : clicked) || autoFire;
     const ready = now - this.lastFireAt >= w.interval;
 
     if (wants && ready && !reloading) {
+      this.input.firePressed = false;
       if (this.me.am <= 0) {
-        if (!auto) this.input.firePressed = false;
         this.sfx.dryFire();
         this.requestReload();
         this.lastFireAt = now - w.interval + 350;
       } else {
-        if (!auto) this.input.firePressed = false;
         this.fire(w, hero);
       }
     }
@@ -573,6 +691,15 @@ export class Game {
     this.input.pitch = Math.min(Math.PI / 2 - 0.02, this.input.pitch + kick);
     this.recoilDebt += kick;
     this.localSpread = Math.min(w.spreadMax ?? w.spread, this.localSpread + (w.spreadPerShot || 0));
+  }
+
+  /** Enemy id directly under the crosshair, or 0. Drives the red crosshair
+   *  and, on touch, auto-fire. */
+  findCrosshairEnemy() {
+    if (!this.alive) return 0;
+    const eye = { x: this.self.x, y: this.self.y + this.eyeSmooth, z: this.self.z };
+    const hit = this.localTrace(eye, lookDir(this.input.yaw, this.input.pitch), 140);
+    return hit?.player || 0;
   }
 
   /** Visual-only trace against the level and the interpolated enemies. */
@@ -733,14 +860,11 @@ export class Game {
     this.hud.vitals(this.me);
     this.hud.setClock(this.matchEndsAt - Date.now());
 
-    // Is an enemy under the crosshair right now?
-    const dir = lookDir(this.input.yaw, this.input.pitch);
-    const eye = { x: this.self.x, y: this.self.y + this.eyeSmooth, z: this.self.z };
-    const hit = this.alive ? this.localTrace(eye, dir, 120) : null;
+    // The crosshair target was already resolved once at the top of the frame.
     this.hud.crosshairSpread(
       this.input.zooming && getHero(this.heroId).weapon.zoomSpread !== undefined ? 0.002 : this.localSpread,
       this.input.zooming && getHero(this.heroId).weapon.scope,
-      hit?.player != null,
+      !!this.crosshairEnemy,
     );
 
     if (!this.alive && this.me.rs >= 0) this.hud.updateRespawn(this.me.rs);
@@ -770,6 +894,19 @@ export class Game {
 
 function lerp(a, b, f) {
   return a + (b - a) * f;
+}
+
+function angleDelta(a, b) {
+  let d = b - a;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return d;
+}
+
+function approachAngle(from, to, maxStep) {
+  const d = angleDelta(from, to);
+  if (Math.abs(d) <= maxStep) return to;
+  return from + Math.sign(d) * maxStep;
 }
 
 function lerpAngle(a, b, f) {

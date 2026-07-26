@@ -312,6 +312,16 @@ kbd {
 .dh:hover { border-color: var(--ink); }
 .dh.on { border-color: var(--hc); color: var(--hc); box-shadow: 0 0 0 1px var(--hc); }
 
+#respawnbtn {
+  display: none;
+  pointer-events: auto;
+  margin: 14px auto 0;
+  font-family: var(--mono); font-size: 14px; letter-spacing: 0.18em;
+  color: #04121c; background: var(--hp);
+  border: none; border-radius: 10px; padding: 12px 30px;
+}
+body.touch-mode #respawnbtn { display: block; }
+
 #scoreboard {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   width: min(920px, 94vw); background: rgba(6, 10, 18, 0.93);
@@ -364,10 +374,167 @@ kbd {
 #loading .spin { width: 34px; height: 34px; border: 2px solid var(--line); border-top-color: var(--t0); border-radius: 50%; animation: sp 0.8s linear infinite; }
 @keyframes sp { to { transform: rotate(360deg); } }
 
+/* ───────────────────────── 터치 조작 (모바일) ───────────────────────── */
+html, body { touch-action: none; -webkit-text-size-adjust: 100%; overscroll-behavior: none; }
+#menu, #menu * { touch-action: auto; }
+body.touch-mode { cursor: auto; }
+body.touch-mode #lockhint { display: none !important; }
+.touch-only { display: none; }
+body.can-touch .touch-only { display: flex; }
+
+#touch {
+  position: absolute; inset: 0; z-index: 25;
+  pointer-events: none;
+  touch-action: none;
+  -webkit-user-select: none; user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#tlook { position: absolute; inset: 0; pointer-events: auto; touch-action: none; }
+#tstickzone {
+  position: absolute; left: 0; bottom: 0;
+  width: 46%; height: 62%;
+  pointer-events: auto; touch-action: none;
+}
+#tstick {
+  position: fixed;
+  left: max(96px, calc(env(safe-area-inset-left) + 96px));
+  top: auto; bottom: max(96px, calc(env(safe-area-inset-bottom) + 96px));
+  width: 132px; height: 132px; margin: -66px 0 0 -66px;
+  border-radius: 50%;
+  border: 2px solid rgba(190, 220, 255, 0.28);
+  background: radial-gradient(circle, rgba(12, 20, 32, 0.42), rgba(12, 20, 32, 0.12));
+  display: grid; place-items: center;
+  transition: opacity 0.2s ease;
+  opacity: 0.5;
+  pointer-events: none;
+}
+#tstick.on { opacity: 0.95; margin-top: -66px; bottom: auto; }
+#tknob {
+  width: 58px; height: 58px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, rgba(226, 242, 255, 0.95), rgba(120, 165, 210, 0.7));
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+}
+
+#tright {
+  position: absolute; right: 0; bottom: 0;
+  padding: 0 max(18px, env(safe-area-inset-right)) max(18px, env(safe-area-inset-bottom)) 0;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 10px;
+  pointer-events: none;
+}
+#tright .trow { display: flex; gap: 10px; pointer-events: none; }
+
+.tbtn {
+  pointer-events: auto;
+  touch-action: none;
+  font-family: var(--mono);
+  font-size: 12px; letter-spacing: 0.06em;
+  color: var(--ink);
+  width: 66px; height: 66px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(190, 220, 255, 0.32);
+  background: rgba(10, 18, 30, 0.55);
+  backdrop-filter: blur(3px);
+  display: grid; place-items: center;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+.tbtn.held { background: rgba(56, 189, 248, 0.45); border-color: #bae6fd; transform: scale(0.94); }
+.tbtn.on { background: rgba(56, 189, 248, 0.3); border-color: var(--t0); color: #e0f2fe; }
+.tbtn.fire {
+  width: 108px; height: 108px; font-size: 15px; font-weight: 700;
+  border-color: rgba(255, 190, 190, 0.45);
+  background: rgba(120, 30, 40, 0.5);
+}
+.tbtn.fire.held { background: rgba(239, 68, 68, 0.6); border-color: #fecaca; }
+.tbtn.small { width: 56px; height: 40px; border-radius: 12px; font-size: 11px; }
+
+#tsmall {
+  position: absolute; left: 0; top: 0;
+  padding: max(44px, calc(env(safe-area-inset-top) + 44px)) 0 0 max(16px, env(safe-area-inset-left));
+  display: flex; gap: 8px;
+  pointer-events: none;
+}
+
+#touch.dead #tright, #touch.dead #tstick, #touch.dead #tstickzone { opacity: 0.25; pointer-events: none; }
+
+/* A landscape phone is often wider than 760px, so the HUD has to make room for
+   the thumbs based on the control scheme rather than on the viewport width. */
+body.touch-mode #bottomleft {
+  left: max(14px, env(safe-area-inset-left));
+  /* Clears the top of the resting movement stick (96px + 66px radius). */
+  bottom: max(174px, calc(env(safe-area-inset-bottom) + 174px));
+}
+body.touch-mode #bottomright {
+  right: max(216px, calc(env(safe-area-inset-right) + 216px));
+  bottom: max(24px, calc(env(safe-area-inset-bottom) + 24px));
+  text-align: left;
+}
+body.touch-mode #ammo { justify-content: flex-start; }
+body.touch-mode #ammonow { font-size: 26px; }
+body.touch-mode #hpbar { width: 120px; height: 11px; }
+body.touch-mode #hpnum { font-size: 20px; min-width: 44px; }
+body.touch-mode #heroname { font-size: 12px; }
+body.touch-mode #ability { width: 38px; height: 38px; }
+body.touch-mode #abilkey { font-size: 14px; }
+body.touch-mode #chatlog { max-width: 40vw; font-size: 11px; margin-bottom: 8px; }
+body.touch-mode #minimap { width: 92px; height: 92px; }
+body.touch-mode #killfeed { top: 168px; font-size: 11px; }
+body.touch-mode #stats { left: 96px; }
+body.touch-mode #weaponname { font-size: 10px; }
+/* Keep the panel clear of the fire button. */
+body.touch-mode #scoreboard { width: min(700px, 76vw); padding: 12px 14px; }
+body.touch-mode #matchover .mo-inner { transform: scale(0.85); }
+
+#chatsend {
+  display: none;
+  pointer-events: auto;
+  font-family: var(--mono); font-size: 12px;
+  color: #04121c; background: var(--t0);
+  border: none; border-radius: 6px; padding: 6px 12px;
+}
+body.touch-mode #chatsend { display: block; }
+
+#rotate {
+  position: fixed; inset: 0; z-index: 70;
+  background: var(--bg); color: var(--ink);
+  display: grid; place-items: center; align-content: center; gap: 14px;
+  font-family: var(--mono); letter-spacing: 0.1em; text-align: center;
+}
+#rotate .rot-icon {
+  font-size: 64px; color: var(--t0);
+  animation: rot 1.6s ease-in-out infinite;
+}
+@keyframes rot { 0%, 40% { transform: rotate(0deg); } 60%, 100% { transform: rotate(90deg); } }
+
+/* ─────────────────────────── 좁은 화면 대응 ─────────────────────────── */
 @media (max-width: 760px) {
-  #minimap { width: 104px; height: 104px; top: 76px; right: 12px; }
-  #killfeed { top: 190px; right: 12px; font-size: 11px; }
-  #hpbar { width: 130px; }
+  #minimap { width: 96px; height: 96px; top: max(70px, calc(env(safe-area-inset-top) + 60px)); right: max(12px, env(safe-area-inset-right)); }
+  #killfeed { top: 176px; right: max(12px, env(safe-area-inset-right)); font-size: 11px; }
+  #hpbar { width: 110px; height: 11px; }
+  #hpnum { font-size: 19px; min-width: 42px; }
   .sb-teams { grid-template-columns: 1fr; }
-  #ammonow { font-size: 30px; }
+  #ammonow { font-size: 26px; }
+  #topbar { top: max(10px, env(safe-area-inset-top)); gap: 10px; }
+  .score b { font-size: 22px; }
+  #vitals { gap: 9px; }
+  #bottomleft { left: max(12px, env(safe-area-inset-left)); bottom: max(118px, calc(env(safe-area-inset-bottom) + 118px)); }
+  #bottomright { right: max(130px, calc(env(safe-area-inset-right) + 130px)); bottom: max(130px, calc(env(safe-area-inset-bottom) + 130px)); }
+  #chatlog { max-width: 46vw; font-size: 11px; }
+  #chatinput { bottom: 50%; left: 50%; transform: translate(-50%, 50%); width: min(420px, 86vw); }
+  #stats { left: max(12px, env(safe-area-inset-left)); top: max(8px, env(safe-area-inset-top)); font-size: 10px; }
+  #scoreboard { padding: 14px; }
+  .sb-team table { font-size: 11px; }
+  #mo-result { font-size: 36px; }
+  .menu-inner { padding: 24px 14px 40px; }
+  .dead-inner { transform: scale(0.9); }
+}
+
+/* 가로 모드 낮은 높이(폰) — HUD를 더 촘촘하게 */
+@media (max-height: 460px) {
+  #minimap { width: 78px; height: 78px; }
+  #killfeed { top: 130px; }
+  .tbtn { width: 56px; height: 56px; font-size: 11px; }
+  .tbtn.fire { width: 88px; height: 88px; font-size: 13px; }
+  #tstick { width: 108px; height: 108px; margin: -54px 0 0 -54px; }
+  #tknob { width: 48px; height: 48px; }
 }

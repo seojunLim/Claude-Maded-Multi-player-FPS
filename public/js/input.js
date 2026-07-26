@@ -26,6 +26,7 @@ export class Input {
     this.yaw = 0;
     this.pitch = 0;
     this.sensitivity = opts.sensitivity ?? 1;
+    this.touchSensitivity = opts.touchSensitivity ?? 1;
     this.invertY = opts.invertY ?? false;
     this.locked = false;
     this.firing = false;
@@ -35,7 +36,35 @@ export class Input {
     this.actions = { reload: 0, ability: 0, respawn: 0 };
     this.onKey = null; // (code, event) => boolean  — return true to swallow
     this.onLockChange = null;
+    this.onTouchUi = null; // (what, on) => void
+
+    // Touch state. `touchMode` flips on at the first touch and off again if the
+    // player goes back to mouse + keyboard, so hybrid devices support both.
+    this.touch = null;
+    this.touchMode = false;
+    this.aimAssist = 0; // 0..1, scaled down while assist is pulling the view
+    this.tapFireUntil = 0;
+
     this._bind();
+  }
+
+  attachTouch(controls) {
+    this.touch = controls;
+  }
+
+  /** Called by the touch look surface with a screen-space drag delta. */
+  lookBy(dx, dy) {
+    const s = 0.0034 * this.touchSensitivity * (1 - this.aimAssist * 0.45);
+    this.yaw -= dx * s;
+    this.pitch += (this.invertY ? dy : -dy) * s;
+    this._clampPitch();
+  }
+
+  /** Analog movement from the stick, or null when the keyboard is driving. */
+  analog() {
+    if (!this.touchMode || !this.touch) return null;
+    const cmd = this.touch.command();
+    return cmd.mx || cmd.mz ? cmd : null;
   }
 
   reset(yaw = 0, pitch = 0) {
@@ -44,9 +73,12 @@ export class Input {
     this.keys = 0;
     this.firing = false;
     this.zooming = false;
+    this.touch?.releaseAll();
   }
 
+  /** Pointer lock is meaningless on a touch screen, so it is skipped there. */
   requestLock() {
+    if (this.touchMode) return;
     if (!this.locked) this.canvas.requestPointerLock?.();
   }
 
@@ -57,7 +89,15 @@ export class Input {
   get bitmask() {
     let k = this.keys;
     if (this.zooming) k |= KEY.ZOOM;
+    if (this.touchMode && this.touch?.sprint) k |= KEY.SPRINT;
     return k;
+  }
+
+  _clampPitch() {
+    const limit = Math.PI / 2 - 0.02;
+    this.pitch = Math.max(-limit, Math.min(limit, this.pitch));
+    if (this.yaw > Math.PI) this.yaw -= Math.PI * 2;
+    if (this.yaw < -Math.PI) this.yaw += Math.PI * 2;
   }
 
   /** Consumes a one-shot action flag. */
@@ -89,22 +129,34 @@ export class Input {
       this.onLockChange?.(this.locked);
     });
 
+    // First touch anywhere switches to touch controls; using the mouse or
+    // keyboard switches back, so 2-in-1 devices support both.
+    window.addEventListener(
+      'pointerdown',
+      (e) => {
+        if (e.pointerType === 'touch') {
+          this.touchMode = true;
+          this.touch?.enable();
+        }
+      },
+      { capture: true, passive: true },
+    );
+
     document.addEventListener(
       'mousemove',
       (e) => {
         if (!this.locked) return;
-        const s = 0.0022 * this.sensitivity;
+        if (e.movementX || e.movementY) this.touchMode = false;
+        const s = 0.0022 * this.sensitivity * (1 - this.aimAssist * 0.3);
         this.yaw -= e.movementX * s;
         this.pitch += (this.invertY ? e.movementY : -e.movementY) * s;
-        const limit = Math.PI / 2 - 0.02;
-        this.pitch = Math.max(-limit, Math.min(limit, this.pitch));
-        if (this.yaw > Math.PI) this.yaw -= Math.PI * 2;
-        if (this.yaw < -Math.PI) this.yaw += Math.PI * 2;
+        this._clampPitch();
       },
       { passive: true },
     );
 
     this.canvas.addEventListener('mousedown', (e) => {
+      if (this.touchMode) return; // synthesised by a touch, already handled
       if (!this.locked) {
         this.requestLock();
         return;
@@ -117,6 +169,7 @@ export class Input {
     });
 
     window.addEventListener('mouseup', (e) => {
+      if (this.touchMode) return;
       if (e.button === 0) this.firing = false;
       if (e.button === 2) this.zooming = false;
     });
@@ -129,6 +182,7 @@ export class Input {
       const bit = BINDS[e.code];
       if (bit) {
         this.keys |= bit;
+        this.touchMode = false; // a real keyboard is in play
         e.preventDefault();
       }
       if (e.code === 'KeyR') this.actions.reload = 1;
@@ -141,10 +195,16 @@ export class Input {
       if (bit) this.keys &= ~bit;
     });
 
-    window.addEventListener('blur', () => {
+    const letGo = () => {
       this.keys = 0;
       this.firing = false;
       this.zooming = false;
+      this.touch?.releaseAll();
+    };
+    window.addEventListener('blur', letGo);
+    // Backgrounding a phone (call, lock screen) must not leave keys stuck down.
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) letGo();
     });
   }
 }

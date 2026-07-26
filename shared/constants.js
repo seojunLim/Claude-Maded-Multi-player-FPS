@@ -51,6 +51,10 @@ export const FALL_DAMAGE_SPEED = 17;
 export const FALL_DAMAGE_PER_SPEED = 5.5;
 
 // Input bit flags packed into a single integer per command.
+// Analog stick values travel as integers in [-MOVE_UNIT, MOVE_UNIT] so both
+// sides of the wire derive an identical movement direction.
+export const MOVE_UNIT = 100;
+
 export const KEY = {
   FORWARD: 1 << 0,
   BACK: 1 << 1,

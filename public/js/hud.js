@@ -43,6 +43,7 @@ export class Hud {
       deadby: $('deadby'),
       respawnnum: $('respawnnum'),
       deadheroes: $('deadheroes'),
+      respawnbtn: $('respawnbtn'),
       scoreboard: $('scoreboard'),
       sb0: $('sb0'),
       sb1: $('sb1'),
@@ -53,6 +54,8 @@ export class Hud {
       moMvp: $('mo-mvp'),
       chatinput: $('chatinput'),
       chatfield: $('chatfield'),
+      chatsend: $('chatsend'),
+      touch: $('touch'),
       fps: $('fps'),
       ping: $('pingtag'),
       lockhint: $('lockhint'),
@@ -250,8 +253,13 @@ export class Hud {
     });
   }
 
+  onRespawn(fn) {
+    this.el.respawnbtn.addEventListener('click', fn);
+  }
+
   showDead(byName, respawnIn) {
     this.el.deadscreen.classList.remove('hidden');
+    this.el.touch?.classList.add('dead');
     this.el.deadby.textContent = byName ? `${byName} 에게 제거됨` : '제거됨';
     this.el.respawnnum.textContent = Math.ceil(respawnIn / 1000);
   }
@@ -262,6 +270,7 @@ export class Hud {
 
   hideDead() {
     this.el.deadscreen.classList.add('hidden');
+    this.el.touch?.classList.remove('dead');
   }
 
   match(info) {
@@ -335,6 +344,16 @@ export class Hud {
     this.el.chatinput.classList.add('hidden');
     this.el.chatfield.blur();
     return this.el.chatfield.value.trim();
+  }
+
+  /** The touch send button (mobile keyboards do not always deliver Enter). */
+  onChatSend(fn) {
+    this.el.chatsend.addEventListener('click', fn);
+  }
+
+  /** Pops the touch chat toggle back out after sending. */
+  setChatButtonOff() {
+    document.querySelector('#touch [data-act="chat"]')?.classList.remove('on');
   }
 
   setStats(fps, ping) {

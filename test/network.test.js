@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocket } from 'ws';
 
-import { MSG, KEY, TICK_DT, PLAYER_EYE } from '../shared/constants.js';
+import { MSG, KEY, TICK_DT, PLAYER_EYE, MOVE_UNIT } from '../shared/constants.js';
 import { buildMap } from '../shared/map.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -149,6 +149,65 @@ test('input moves the player and the server acknowledges commands', async (t) =>
   assert.ok(moved > 3, `player should have moved, only went ${moved.toFixed(2)}m`);
   assert.ok(c.last.ack > 0, 'server should acknowledge processed commands');
   assert.ok(Math.abs(end.z) < Math.abs(start.z), 'should have moved towards the centre');
+});
+
+test('analog touch input moves the player over the wire', async (t) => {
+  const c = new TestClient();
+  t.after(() => c.close());
+  await c.connect({ name: 'THUMB', hero: 'ranger', room: 'net-stick' });
+  await sleep(500);
+
+  const start = { ...c.last.me };
+  const yaw = c.welcome.team === 0 ? 0 : Math.PI;
+  // A fully pushed stick, sent the way the touch controls do: no key bits at
+  // all, just the quantised analog pair.
+  for (let i = 0; i < 20; i++) {
+    const cmds = [];
+    for (let j = 0; j < 3; j++) cmds.push([++c.seq, 0, yaw, 0, 0, -MOVE_UNIT]);
+    c.send({ t: MSG.COMMANDS, c: cmds });
+    await sleep(33);
+  }
+  await sleep(300);
+
+  const end = c.last.me;
+  const moved = Math.hypot(end.x - start.x, end.z - start.z);
+  assert.ok(moved > 3, `the stick should have moved the player, only went ${moved.toFixed(2)}m`);
+  assert.ok(Math.abs(end.z) < Math.abs(start.z), 'should have moved towards the centre');
+
+  // A half-pushed stick must cover noticeably less ground in the same time.
+  const halfStart = { ...c.last.me };
+  for (let i = 0; i < 20; i++) {
+    const cmds = [];
+    for (let j = 0; j < 3; j++) cmds.push([++c.seq, 0, yaw, 0, 0, -Math.round(MOVE_UNIT * 0.35)]);
+    c.send({ t: MSG.COMMANDS, c: cmds });
+    await sleep(33);
+  }
+  await sleep(300);
+  const halfMoved = Math.hypot(c.last.me.x - halfStart.x, c.last.me.z - halfStart.z);
+  assert.ok(halfMoved < moved, `a light push (${halfMoved.toFixed(2)}m) should be slower than a full one (${moved.toFixed(2)}m)`);
+});
+
+test('out-of-range analog values are clamped, not trusted', async (t) => {
+  const c = new TestClient();
+  t.after(() => c.close());
+  await c.connect({ name: 'CHEAT', hero: 'ranger', room: 'net-clamp' });
+  await sleep(500);
+
+  const start = { ...c.last.me };
+  // A hacked client asking for 100x the legal stick deflection.
+  for (let i = 0; i < 20; i++) {
+    const cmds = [];
+    for (let j = 0; j < 3; j++) cmds.push([++c.seq, 0, 0, 0, 0, -MOVE_UNIT * 100]);
+    c.send({ t: MSG.COMMANDS, c: cmds });
+    await sleep(33);
+  }
+  await sleep(300);
+
+  const elapsed = 20 * 33 + 300;
+  const moved = Math.hypot(c.last.me.x - start.x, c.last.me.z - start.z);
+  // Even at full sprint the hero covers ~8.5 m/s; allow generous slack.
+  const ceiling = (elapsed / 1000) * 12;
+  assert.ok(moved < ceiling, `moved ${moved.toFixed(2)}m in ${elapsed}ms, over the ${ceiling.toFixed(2)}m ceiling`);
 });
 
 test('two clients in one room see each other and can trade damage', async (t) => {

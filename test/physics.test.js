@@ -14,7 +14,7 @@ import {
   hasLineOfSight,
   groundHeightAt,
 } from '../shared/physics.js';
-import { KEY, TICK_DT, PLAYER_HEIGHT, SPRINT_MULT, AIR_SPEED_CAP } from '../shared/constants.js';
+import { KEY, TICK_DT, PLAYER_HEIGHT, SPRINT_MULT, AIR_SPEED_CAP, MOVE_UNIT } from '../shared/constants.js';
 
 const map = buildMap();
 const world = makeWorld(map);
@@ -177,6 +177,77 @@ test('spawns face towards the middle of the map', () => {
       assert.ok(Math.sign(dir.z) === -Math.sign(s.z), `spawn at z=${s.z} faces the wrong way`);
     }
   }
+});
+
+test('an analog stick moves in the same directions as the keys', () => {
+  // Touch controls send mx/mz instead of key bits; both paths must agree or a
+  // phone player would drift away from what the server simulates.
+  const cases = [
+    ['forward', { mx: 0, mz: -MOVE_UNIT }, KEY.FORWARD],
+    ['back', { mx: 0, mz: MOVE_UNIT }, KEY.BACK],
+    ['right', { mx: MOVE_UNIT, mz: 0 }, KEY.RIGHT],
+    ['left', { mx: -MOVE_UNIT, mz: 0 }, KEY.LEFT],
+  ];
+  for (const [label, stick, keys] of cases) {
+    for (const yaw of [0, 1.2, -2.5]) {
+      const withStick = spawn(0, 0, 25);
+      const withKeys = spawn(0, 0, 25);
+      for (let i = 0; i < 20; i++) {
+        stepPlayer(withStick, { keys: 0, yaw, ...stick }, world, TICK_DT, { speed: SPEED });
+        stepPlayer(withKeys, { keys, yaw }, world, TICK_DT, { speed: SPEED });
+      }
+      assert.ok(
+        Math.abs(withStick.x - withKeys.x) < 0.01 && Math.abs(withStick.z - withKeys.z) < 0.01,
+        `${label} at yaw ${yaw}: stick (${withStick.x.toFixed(2)}, ${withStick.z.toFixed(2)}) vs keys (${withKeys.x.toFixed(2)}, ${withKeys.z.toFixed(2)})`,
+      );
+    }
+  }
+});
+
+test('a half-pushed stick walks at half speed', () => {
+  const full = spawn(0, 0, 25);
+  const half = spawn(0, 0, 25);
+  for (let i = 0; i < 40; i++) {
+    stepPlayer(full, { keys: 0, yaw: 0, mx: 0, mz: -MOVE_UNIT }, world, TICK_DT, { speed: SPEED });
+    stepPlayer(half, { keys: 0, yaw: 0, mx: 0, mz: -Math.round(MOVE_UNIT / 2) }, world, TICK_DT, { speed: SPEED });
+  }
+  const fullSpeed = Math.hypot(full.vx, full.vz);
+  const halfSpeed = Math.hypot(half.vx, half.vz);
+  assert.ok(Math.abs(fullSpeed - SPEED) < 0.3, `full push should reach ${SPEED}, got ${fullSpeed.toFixed(2)}`);
+  assert.ok(
+    Math.abs(halfSpeed - SPEED / 2) < 0.3,
+    `half push should reach ${(SPEED / 2).toFixed(2)}, got ${halfSpeed.toFixed(2)}`,
+  );
+});
+
+test('a diagonal stick is not faster than a straight one', () => {
+  const straight = spawn(0, 0, 25);
+  const diagonal = spawn(0, 0, 25);
+  const d = Math.round(MOVE_UNIT * 0.7071);
+  for (let i = 0; i < 40; i++) {
+    stepPlayer(straight, { keys: 0, yaw: 0, mx: 0, mz: -MOVE_UNIT }, world, TICK_DT, { speed: SPEED });
+    stepPlayer(diagonal, { keys: 0, yaw: 0, mx: d, mz: -d }, world, TICK_DT, { speed: SPEED });
+  }
+  const a = Math.hypot(straight.vx, straight.vz);
+  const b = Math.hypot(diagonal.vx, diagonal.vz);
+  assert.ok(b <= a + 0.15, `diagonal ${b.toFixed(2)} should not exceed straight ${a.toFixed(2)}`);
+});
+
+test('the stick only sprints when pushed forwards', () => {
+  // Run inside a spawn hall along x, which is clear of cover either way.
+  const peakSpeed = (state, stick) => {
+    let peak = 0;
+    for (let i = 0; i < 50; i++) {
+      stepPlayer(state, { keys: KEY.SPRINT, yaw: Math.PI / 2, ...stick }, world, TICK_DT, { speed: SPEED });
+      peak = Math.max(peak, Math.hypot(state.vx, state.vz));
+    }
+    return peak;
+  };
+  const forward = peakSpeed(spawn(8, 0, 32), { mx: 0, mz: -MOVE_UNIT });
+  const backward = peakSpeed(spawn(-8, 0, 32), { mx: 0, mz: MOVE_UNIT });
+
+  assert.ok(forward > SPEED * 1.2, `forward push should sprint, peaked at ${forward.toFixed(2)}`);
+  assert.ok(backward <= SPEED * 1.05, `backpedalling must not sprint, peaked at ${backward.toFixed(2)}`);
 });
 
 test('a player fits through every doorway', () => {
