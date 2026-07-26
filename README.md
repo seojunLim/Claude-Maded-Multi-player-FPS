@@ -122,20 +122,55 @@ npm start
 # network http://192.168.x.x:3000  ← 이 주소를 친구에게 전달
 ```
 
-**인터넷에 배포** — 필요한 것은 단 하나, *상시 실행되는 Node 프로세스와 WebSocket
-업그레이드를 통과시키는 호스트*입니다. `Dockerfile`이 포함되어 있습니다.
+### Render + GitHub 배포 (권장)
+
+`render.yaml`이 포함되어 있어 클릭 몇 번으로 끝납니다. GitHub에 푸시할 때마다
+자동 재배포됩니다.
+
+1. 이 저장소를 GitHub에 푸시합니다(이미 되어 있으면 생략).
+2. [dashboard.render.com](https://dashboard.render.com) → **New ▸ Blueprint**
+3. GitHub 계정을 연결하고 이 저장소를 선택합니다.
+   Render가 `render.yaml`을 읽어 설정을 자동으로 채웁니다.
+4. **Apply**를 누르면 빌드(`npm ci --omit=dev`) 후 서버가 실행됩니다.
+5. 2~3분 뒤 `https://sanctum-fps.onrender.com` 형태의 주소가 발급됩니다.
+   그 주소를 친구에게 보내고, 같은 **매치 코드**(`?room=코드`)로 들어가면 같은
+   경기에서 만납니다.
+
+Blueprint 대신 수동으로 만들려면 **New ▸ Web Service**에서 이렇게 설정합니다.
+
+| 항목 | 값 |
+| --- | --- |
+| Language / Runtime | `Node` |
+| Region | `Singapore` (한국에서 지연이 가장 낮음) |
+| Build Command | `npm ci --omit=dev` |
+| Start Command | `node server/index.js` |
+| Health Check Path | `/api/status` |
+| Environment Variable | `BOTS` = `6` (선택) |
+
+Render가 주입하는 `PORT`를 그대로 사용하고 HTTPS도 자동으로 붙습니다.
+클라이언트는 그때 스스로 `wss://`로 전환하므로 **코드를 고칠 곳이 없습니다.**
+
+알아둘 점:
+
+- **Free 플랜은 15분간 접속이 없으면 잠들고**, 다음 접속에서 깨어나는 데
+  30초~1분이 걸립니다. 경기 중에는 WebSocket이 계속 연결돼 있어 잠들지 않습니다.
+  상시 대기가 필요하면 Starter 플랜으로 올리세요.
+- **인스턴스는 반드시 1개로 유지하세요.** 매치 상태가 프로세스 메모리에 있어서,
+  인스턴스가 여러 개면 같은 매치 코드로 들어간 두 사람이 서로 다른 프로세스에
+  배정되어 서로를 보지 못합니다.
+
+### 그 밖의 호스팅
+
+필요한 것은 단 하나, *상시 실행되는 Node 프로세스와 WebSocket 업그레이드를
+통과시키는 호스트*입니다. `Dockerfile`도 포함되어 있습니다.
 
 ```bash
-# Fly.io
-fly launch --now            # Dockerfile 자동 인식
-# Render / Railway / Koyeb: 저장소 연결 → Docker 선택 → 배포
-# 직접 운영하는 서버(VPS)
-docker build -t sanctum . && docker run -d -p 80:8080 -e BOTS=6 sanctum
+fly launch --now                                    # Fly.io (Dockerfile 자동 인식)
+docker build -t sanctum . && docker run -d -p 80:8080 sanctum   # VPS
 ```
 
-`PORT`는 플랫폼이 주는 값을 그대로 따르고, TLS는 플랫폼의 종단에서 처리되므로
-추가 설정이 없습니다. 리버스 프록시를 직접 쓴다면 WebSocket 업그레이드만
-넘겨주면 됩니다(nginx: `proxy_set_header Upgrade $http_upgrade;`와
+리버스 프록시를 직접 운영한다면 WebSocket 업그레이드만 넘겨주면 됩니다
+(nginx: `proxy_set_header Upgrade $http_upgrade;` +
 `proxy_set_header Connection "upgrade";`).
 
 **동작하지 않는 방식** — GitHub Pages, Netlify, Vercel의 정적 호스팅처럼

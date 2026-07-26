@@ -1,0 +1,31 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+#
+# Render 대시보드에서 New ▸ Blueprint 로 이 저장소를 연결하면 아래 설정대로
+# 자동 생성됩니다. Render 가 주는 PORT 를 그대로 사용하고 모든 인터페이스에
+# 바인딩하므로 코드 수정은 필요 없습니다. HTTPS 도 자동으로 붙고, 그때
+# 클라이언트는 스스로 wss:// 로 전환합니다.
+#
+# ⚠️ 인스턴스를 2개 이상으로 늘리지 마세요.
+#    매치(방) 상태가 프로세스 메모리에 있기 때문에, 인스턴스가 여러 개면 같은
+#    매치 코드로 들어간 두 사람이 서로 다른 프로세스에 배정되어 서로를 보지
+#    못합니다. 여러 대로 확장하려면 방 단위 sticky routing 이나 외부 상태
+#    저장소가 먼저 필요합니다.
+
+services:
+  - type: web
+    name: sanctum-fps
+    runtime: node
+    # 한국에서 가장 지연이 낮은 리전. oregon 은 태평양을 건너 130ms 이상 붙습니다.
+    region: singapore
+    plan: free
+    # branch 를 적지 않으면 저장소의 기본 브랜치를 따라갑니다.
+    buildCommand: npm ci --omit=dev
+    startCommand: node server/index.js
+    healthCheckPath: /api/status
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # 방마다 빈자리를 채울 봇 수. 0 이면 사람만 플레이합니다.
+      - key: BOTS
+        value: "6"
