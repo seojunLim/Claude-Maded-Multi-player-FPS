@@ -105,3 +105,42 @@ npm test
 
 `npm install` 후 `three.js`는 `public/vendor/`로 복사되어 오프라인에서도 동작합니다.
 다시 복사하려면 `npm run vendor`를 실행하세요.
+
+---
+
+## 온라인으로 서비스하기
+
+이 게임은 **접속 주소를 하드코딩하지 않습니다.** 클라이언트는 페이지를 내려준
+호스트로 되돌아 접속하고(`ws://<그 호스트>`), HTTPS로 서비스되면 자동으로 `wss`를
+씁니다. 서버는 모든 인터페이스에 바인딩하므로 코드를 고칠 필요 없이 그대로
+배포하면 됩니다. 실행하면 공유할 주소가 콘솔에 출력됩니다.
+
+**같은 네트워크(집·사무실·PC방)에서 바로**
+
+```bash
+npm start
+# network http://192.168.x.x:3000  ← 이 주소를 친구에게 전달
+```
+
+**인터넷에 배포** — 필요한 것은 단 하나, *상시 실행되는 Node 프로세스와 WebSocket
+업그레이드를 통과시키는 호스트*입니다. `Dockerfile`이 포함되어 있습니다.
+
+```bash
+# Fly.io
+fly launch --now            # Dockerfile 자동 인식
+# Render / Railway / Koyeb: 저장소 연결 → Docker 선택 → 배포
+# 직접 운영하는 서버(VPS)
+docker build -t sanctum . && docker run -d -p 80:8080 -e BOTS=6 sanctum
+```
+
+`PORT`는 플랫폼이 주는 값을 그대로 따르고, TLS는 플랫폼의 종단에서 처리되므로
+추가 설정이 없습니다. 리버스 프록시를 직접 쓴다면 WebSocket 업그레이드만
+넘겨주면 됩니다(nginx: `proxy_set_header Upgrade $http_upgrade;`와
+`proxy_set_header Connection "upgrade";`).
+
+**동작하지 않는 방식** — GitHub Pages, Netlify, Vercel의 정적 호스팅처럼
+서버 프로세스를 상시 띄울 수 없는 곳에서는 멀티플레이가 불가능합니다.
+권위 서버가 60Hz로 계속 돌아야 하는 구조이기 때문입니다.
+
+규모에 대해: 한 프로세스가 여러 방을 동시에 돌리고 방 하나는 최대 12명입니다.
+방이 비면 자동으로 정리되므로 작은 인스턴스 한 대로도 충분합니다.

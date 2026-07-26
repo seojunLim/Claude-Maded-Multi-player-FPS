@@ -2,6 +2,7 @@
 
 import http from 'node:http';
 import path from 'node:path';
+import { networkInterfaces } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { WebSocketServer } from 'ws';
@@ -166,6 +167,18 @@ function sanitizeName(raw) {
   return name || 'RECRUIT';
 }
 
+// Binding without a host listens on every interface, so the same process serves
+// this machine, the local network and — once deployed behind a proxy — the
+// internet. The client always dials back the host that served the page.
 server.listen(PORT, () => {
-  console.log(`SANCTUM FPS server listening on http://localhost:${PORT}`);
+  console.log(`SANCTUM FPS server listening on port ${PORT} (all interfaces)`);
+  console.log(`  local   http://localhost:${PORT}`);
+  for (const [name, addrs] of Object.entries(networkInterfaces())) {
+    for (const a of addrs || []) {
+      if (a.family === 'IPv4' && !a.internal) {
+        console.log(`  network http://${a.address}:${PORT}  (${name} — share this with players on your LAN)`);
+      }
+    }
+  }
+  console.log(`  bots per match: ${Number.isFinite(BOTS) ? BOTS : 6}`);
 });
