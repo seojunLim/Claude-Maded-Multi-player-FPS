@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>SANCTUM — 멀티플레이 온라인 FPS</title>
+    <meta name="description" content="브라우저에서 바로 즐기는 팀 데스매치 FPS. 4개의 영웅, 실시간 멀티플레이." />
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%2338bdf8' stroke-width='2'/%3E%3Cpath d='M16 3v8M16 21v8M3 16h8M21 16h8' stroke='%2338bdf8' stroke-width='2'/%3E%3C/svg%3E" />
+    <script type="importmap">
+      { "imports": { "three": "/vendor/three/three.module.min.js" } }
+    </script>
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+
+    <!-- ────────────────────────────── HUD ────────────────────────────── -->
+    <div id="hud" class="hidden">
+      <div id="crosshair">
+        <span class="ch ch-t"></span><span class="ch ch-b"></span>
+        <span class="ch ch-l"></span><span class="ch ch-r"></span>
+        <span id="ch-dot"></span>
+      </div>
+      <div id="hitmarker"></div>
+      <div id="scope" class="hidden">
+        <div class="scope-ring"></div>
+        <div class="scope-v"></div>
+        <div class="scope-h"></div>
+      </div>
+
+      <div id="topbar">
+        <div class="score s0"><span class="tname">LUMEN</span><b id="score0">0</b></div>
+        <div id="clock">
+          <div id="timer">8:00</div>
+          <div id="matchstate">준비 중</div>
+        </div>
+        <div class="score s1"><b id="score1">0</b><span class="tname">EMBER</span></div>
+      </div>
+
+      <div id="killfeed"></div>
+
+      <div id="bottomleft">
+        <div id="chatlog"></div>
+        <div id="vitals">
+          <div id="herotag"><span id="heroname">RANGER</span><span id="herorole">Assault</span></div>
+          <div id="hpwrap">
+            <div id="hpbar"><i id="hpfill"></i></div>
+            <div id="hpnum">150</div>
+          </div>
+          <div id="abilitywrap">
+            <div id="ability"><span id="abilkey">Q</span><i id="abilcool"></i></div>
+            <div id="abilname">SURGE</div>
+          </div>
+        </div>
+      </div>
+
+      <div id="bottomright">
+        <div id="weaponname">AR-15 PULSE</div>
+        <div id="ammo"><b id="ammonow">30</b><span id="ammomax">/30</span></div>
+        <div id="reloadhint" class="hidden">R — 재장전</div>
+        <div id="reloadbar" class="hidden"><i></i></div>
+      </div>
+
+      <canvas id="minimap" width="220" height="220"></canvas>
+
+      <div id="dmgvignette"></div>
+      <div id="dmgdirs"></div>
+      <div id="killbanner"></div>
+      <div id="streakbanner"></div>
+
+      <div id="deadscreen" class="hidden">
+        <div class="dead-inner">
+          <div id="deadby">제거됨</div>
+          <div id="respawnring"><span id="respawnnum">5</span></div>
+          <div class="dead-hint">부활 대기 중 — 영웅을 교체할 수 있습니다</div>
+          <div id="deadheroes"></div>
+        </div>
+      </div>
+
+      <div id="scoreboard" class="hidden">
+        <div class="sb-head">
+          <h2>SANCTUM — 팀 데스매치</h2>
+          <div id="sb-score"></div>
+        </div>
+        <div class="sb-teams">
+          <div class="sb-team" data-team="0">
+            <h3>LUMEN</h3>
+            <table><thead><tr><th>이름</th><th>영웅</th><th>K</th><th>D</th><th>DMG</th><th>PING</th></tr></thead><tbody id="sb0"></tbody></table>
+          </div>
+          <div class="sb-team" data-team="1">
+            <h3>EMBER</h3>
+            <table><thead><tr><th>이름</th><th>영웅</th><th>K</th><th>D</th><th>DMG</th><th>PING</th></tr></thead><tbody id="sb1"></tbody></table>
+          </div>
+        </div>
+        <div class="sb-foot">TAB — 스코어보드 · ENTER — 채팅 · ESC — 마우스 해제</div>
+      </div>
+
+      <div id="matchover" class="hidden">
+        <div class="mo-inner">
+          <div id="mo-result">승리</div>
+          <div id="mo-score">50 : 32</div>
+          <div id="mo-mvp"></div>
+          <div class="mo-hint">다음 매치가 곧 시작됩니다…</div>
+        </div>
+      </div>
+
+      <div id="chatinput" class="hidden"><span>전체</span><input id="chatfield" maxlength="120" autocomplete="off" /></div>
+
+      <div id="stats"><span id="fps">60 FPS</span><span id="pingtag">0 ms</span></div>
+      <div id="lockhint" class="hidden">클릭하여 조준 시작</div>
+    </div>
+
+    <!-- ───────────────────────────── 메뉴 ───────────────────────────── -->
+    <div id="menu">
+      <div class="menu-bg"></div>
+      <div class="menu-inner">
+        <header>
+          <h1>SANCTUM</h1>
+          <p class="sub">브라우저에서 바로 즐기는 <b>실시간 멀티플레이 FPS</b> — 팀 데스매치</p>
+        </header>
+
+        <div class="panel">
+          <div class="row">
+            <label>
+              <span>콜사인</span>
+              <input id="nameinput" maxlength="14" placeholder="RECRUIT" autocomplete="off" />
+            </label>
+            <label>
+              <span>매치 코드</span>
+              <input id="roominput" maxlength="20" placeholder="sanctum" autocomplete="off" />
+            </label>
+          </div>
+
+          <h2 class="section">영웅 선택</h2>
+          <div id="heroes"></div>
+
+          <div class="row settings">
+            <label class="slider">
+              <span>마우스 감도 <b id="sensval">1.00</b></span>
+              <input id="sens" type="range" min="0.2" max="3" step="0.05" value="1" />
+            </label>
+            <label class="slider">
+              <span>시야각(FOV) <b id="fovval">90</b></span>
+              <input id="fov" type="range" min="70" max="110" step="1" value="90" />
+            </label>
+            <label class="check"><input id="invertY" type="checkbox" /><span>Y축 반전</span></label>
+            <label class="check"><input id="shadows" type="checkbox" checked /><span>그림자</span></label>
+          </div>
+
+          <button id="play">전투 참가</button>
+          <div id="menustatus"></div>
+        </div>
+
+        <div class="cols">
+          <div class="card">
+            <h3>조작</h3>
+            <ul class="keys">
+              <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 이동</li>
+              <li><kbd>Shift</kbd> 달리기 · <kbd>Ctrl</kbd> 앉기 · <kbd>Space</kbd> 점프</li>
+              <li><kbd>좌클릭</kbd> 사격 · <kbd>우클릭</kbd> 조준 · <kbd>R</kbd> 재장전</li>
+              <li><kbd>Q</kbd> 영웅 스킬 · <kbd>Tab</kbd> 스코어보드</li>
+              <li><kbd>Enter</kbd> 채팅 · <kbd>Esc</kbd> 마우스 해제</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>규칙</h3>
+            <ul class="keys">
+              <li>두 팀이 <b>50킬</b> 또는 <b>8분</b>을 두고 경합합니다.</li>
+              <li>헤드샷은 무기에 따라 1.5~2.2배 피해.</li>
+              <li>사망 후 5초 뒤 부활, 부활 시 영웅 교체 가능.</li>
+              <li>서버가 모든 판정을 처리하고 <b>지연 보상</b>을 적용합니다.</li>
+              <li>빈 자리는 봇이 채워 언제든 바로 플레이할 수 있습니다.</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>같이 하기</h3>
+            <p class="small">같은 <b>매치 코드</b>를 입력하면 친구와 같은 서버에서 만납니다. 아래 주소를 공유하세요.</p>
+            <div id="sharelink"></div>
+            <p class="small" id="serverinfo">서버 상태 확인 중…</p>
+          </div>
+        </div>
+        <footer>WASD로 움직이고, 마우스로 조준하세요. 준비되면 <b>전투 참가</b>.</footer>
+      </div>
+    </div>
+
+    <div id="loading" class="hidden"><div class="spin"></div><span>매치 접속 중…</span></div>
+
+    <script type="module" src="/js/main.js"></script>
+  </body>
+</html>
