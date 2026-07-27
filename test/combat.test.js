@@ -5,7 +5,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { Room } from '../server/room.js';
-import { MATCH_STATE, PLAYER_EYE, RESPAWN_MS } from '../shared/constants.js';
+import {
+  MATCH_STATE,
+  PLAYER_EYE,
+  RESPAWN_MS,
+  ROOM_SIZE_MIN,
+  ROOM_SIZE_MAX,
+  ROOM_SIZE_DEFAULT,
+} from '../shared/constants.js';
 import { getHero } from '../shared/heroes.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -320,6 +327,96 @@ test('kills before the match starts do not score', async (t) => {
   room.kill(v, a, false, 'TEST');
   assert.deepEqual(room.scores, [0, 0], 'no team score outside a live match');
   assert.equal(a.kills, 1, 'personal stats still track for the warmup scoreboard');
+});
+
+test('match size is clamped to the allowed range', () => {
+  const cases = [
+    [undefined, ROOM_SIZE_DEFAULT],
+    [1, ROOM_SIZE_MIN],
+    [0, ROOM_SIZE_MIN],
+    [-5, ROOM_SIZE_MIN],
+    [2, 2],
+    [4, 4],
+    [6, 6],
+    [7, ROOM_SIZE_MAX],
+    [999, ROOM_SIZE_MAX],
+    ['4', 4],
+    ['nonsense', ROOM_SIZE_DEFAULT],
+    [NaN, ROOM_SIZE_DEFAULT],
+  ];
+  for (const [asked, expected] of cases) {
+    const room = new Room(`size-${asked}`, { size: asked });
+    assert.equal(room.size, expected, `size ${JSON.stringify(asked)} should clamp to ${expected}`);
+    room.destroy();
+  }
+});
+
+test('a four-player match waits for all four', async (t) => {
+  const room = new Room('four', { bots: 0, size: 4 });
+  t.after(() => room.destroy());
+
+  const added = [];
+  for (let i = 0; i < 3; i++) {
+    added.push(room.addPlayer({ name: `P${i}`, heroId: 'ranger', socket: null }));
+    await sleep(150);
+    assert.equal(room.state, MATCH_STATE.WAITING, `${i + 1}/4 players should still be waiting`);
+  }
+  assert.equal(room.matchInfo().need, 4);
+
+  room.addPlayer({ name: 'P3', heroId: 'ranger', socket: null });
+  await sleep(200);
+  assert.equal(room.state, MATCH_STATE.WARMUP, 'the fourth player starts the match');
+});
+
+test('players can start early once there are two of them', async (t) => {
+  const room = new Room('early', { bots: 0, size: 6 });
+  t.after(() => room.destroy());
+
+  const a = room.addPlayer({ name: 'A', heroId: 'ranger', socket: null });
+  await sleep(150);
+  assert.equal(room.canStartEarly, false, 'one player cannot start a match alone');
+  room.onStartRequest(a);
+  await sleep(150);
+  assert.equal(room.state, MATCH_STATE.WAITING, 'and asking anyway does nothing');
+
+  room.addPlayer({ name: 'B', heroId: 'ranger', socket: null });
+  await sleep(150);
+  assert.equal(room.canStartEarly, true, 'two of six can choose to start');
+  assert.equal(room.matchInfo().canStart, 1);
+
+  room.onStartRequest(a);
+  await sleep(200);
+  assert.equal(room.state, MATCH_STATE.WARMUP, 'the early start is honoured');
+});
+
+test('a full room does not offer an early start', async (t) => {
+  const room = new Room('full-two', { bots: 0, size: 2 });
+  t.after(() => room.destroy());
+  room.addPlayer({ name: 'A', heroId: 'ranger', socket: null });
+  room.addPlayer({ name: 'B', heroId: 'ranger', socket: null });
+  await sleep(200);
+  assert.equal(room.canStartEarly, false);
+  assert.equal(room.state, MATCH_STATE.WARMUP, 'it just starts on its own');
+});
+
+test('an early start does not carry over to the next match', async (t) => {
+  const room = new Room('carry', { bots: 0, size: 6 });
+  t.after(() => room.destroy());
+  const a = room.addPlayer({ name: 'A', heroId: 'ranger', socket: null });
+  const b = room.addPlayer({ name: 'B', heroId: 'ranger', socket: null });
+  await sleep(150);
+  room.onStartRequest(a);
+  await sleep(200);
+  assert.equal(room.state, MATCH_STATE.WARMUP);
+
+  room.removePlayer(b.id);
+  await sleep(200);
+  assert.equal(room.state, MATCH_STATE.WAITING);
+  assert.equal(room.startedEarly, false, 'the next match must be started deliberately again');
+
+  room.addPlayer({ name: 'C', heroId: 'ranger', socket: null });
+  await sleep(300);
+  assert.equal(room.state, MATCH_STATE.WAITING, 'two of six no longer auto-starts');
 });
 
 test('the match ends when the score limit is reached', async (t) => {

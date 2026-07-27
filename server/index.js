@@ -7,7 +7,17 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 
-import { MSG, MAX_PLAYERS, MAX_NAME_LEN, MAX_CHAT_LEN, TICK_RATE, SNAPSHOT_RATE, COMMAND_SEND_RATE, INTERP_DELAY_MS } from '../shared/constants.js';
+import {
+  MSG,
+  MAX_NAME_LEN,
+  MAX_CHAT_LEN,
+  TICK_RATE,
+  SNAPSHOT_RATE,
+  COMMAND_SEND_RATE,
+  INTERP_DELAY_MS,
+  ROOM_SIZE_MIN,
+  ROOM_SIZE_MAX,
+} from '../shared/constants.js';
 import { HEROES } from '../shared/heroes.js';
 import { Room } from './room.js';
 
@@ -25,13 +35,18 @@ app.use('/shared', express.static(path.join(ROOT, 'shared')));
 
 const rooms = new Map();
 
-function getRoom(name) {
+/**
+ * Rooms are created by whoever gets there first, and their match size is fixed
+ * for the life of the room — later arrivals join the match as it was set up
+ * rather than resizing it under the people already waiting.
+ */
+function getRoom(name, size) {
   const key = String(name || 'sanctum').toLowerCase().replace(/[^a-z0-9-_]/g, '').slice(0, 20) || 'sanctum';
   let room = rooms.get(key);
   if (!room) {
-    room = new Room(key, { bots: Number.isFinite(BOTS) ? BOTS : 0 });
+    room = new Room(key, { bots: Number.isFinite(BOTS) ? BOTS : 0, size });
     rooms.set(key, room);
-    console.log(`[room] created "${key}"`);
+    console.log(`[room] created "${key}" for ${room.size} players`);
   }
   return room;
 }
@@ -43,9 +58,11 @@ app.get('/api/status', (req, res) => {
       players: r.humanCount,
       bots: r.count - r.humanCount,
       state: r.state,
+      size: r.size,
       scores: r.scores,
     })),
     heroes: Object.values(HEROES).map((h) => ({ id: h.id, name: h.name, role: h.role })),
+    roomSize: { min: ROOM_SIZE_MIN, max: ROOM_SIZE_MAX },
     uptime: Math.round(process.uptime()),
   });
 });
@@ -87,9 +104,9 @@ wss.on('connection', (socket) => {
 
     if (msg.t === MSG.JOIN) {
       if (player) return;
-      room = getRoom(msg.room);
-      if (room.humanCount >= MAX_PLAYERS) {
-        fail('This match is full — try another room name.');
+      room = getRoom(msg.room, msg.size);
+      if (room.humanCount >= room.size) {
+        fail(`이 매치는 정원(${room.size}명)이 찼습니다. 다른 매치 코드를 사용해 주세요.`);
         return;
       }
       const name = sanitizeName(msg.name);
@@ -102,6 +119,7 @@ wss.on('connection', (socket) => {
           team: player.team,
           hero: player.heroId,
           room: room.name,
+          size: room.size,
           now: Date.now(),
           cfg: { TICK_RATE, SNAPSHOT_RATE, COMMAND_SEND_RATE, INTERP_DELAY_MS },
         }),
@@ -129,6 +147,9 @@ wss.on('connection', (socket) => {
         break;
       case MSG.RESPAWN:
         room.onRespawnRequest(player, msg.hero);
+        break;
+      case MSG.START:
+        room.onStartRequest(player);
         break;
       case MSG.CHAT:
         room.onChat(player, String(msg.msg || '').slice(0, MAX_CHAT_LEN));

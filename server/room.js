@@ -12,8 +12,10 @@ import {
   RESPAWN_MS,
   WARMUP_MS,
   POST_MATCH_MS,
-  MAX_PLAYERS,
   MIN_PLAYERS,
+  ROOM_SIZE_MIN,
+  ROOM_SIZE_MAX,
+  ROOM_SIZE_DEFAULT,
   MSG,
   EV,
   KEY,
@@ -54,6 +56,8 @@ export class Room {
     this.scores = [0, 0];
     this.state = MATCH_STATE.WAITING;
     this.stateEndsAt = 0;
+    this.size = clampRoomSize(opts.size);
+    this.startedEarly = false;
     this.botTarget = opts.bots ?? 0;
     this.lastBotCheck = 0;
     this.rosterDirty = true;
@@ -146,7 +150,7 @@ export class Room {
 
     const humans = this.humanCount;
     let bots = this.count - humans;
-    const want = Math.max(0, Math.min(this.botTarget, MAX_PLAYERS - humans));
+    const want = Math.max(0, Math.min(this.botTarget, this.size - humans));
 
     while (bots < want) {
       const heroIds = Object.keys(HEROES);
@@ -279,7 +283,8 @@ export class Room {
       limit: SCORE_LIMIT,
       map: this.map.name,
       humans: this.humanCount,
-      need: MIN_PLAYERS,
+      need: this.size,
+      canStart: this.canStartEarly ? 1 : 0,
       roster: this.roster(),
     };
   }
@@ -602,15 +607,33 @@ export class Room {
   }
 
   setState(state, durationMs) {
+    // Falling back to waiting retires the early-start decision: the next match
+    // has to be started deliberately again.
+    if (state === MATCH_STATE.WAITING) this.startedEarly = false;
     this.state = state;
     this.stateEndsAt = Date.now() + durationMs;
     this.rosterDirty = true;
     this.broadcast(this.matchInfo());
   }
 
-  /** Enough players present for a real match? */
+  /**
+   * A match runs once the room is full. Players who do not want to wait for
+   * the last seat can start early, as long as there are at least two of them.
+   */
   get canPlay() {
-    return this.count >= MIN_PLAYERS;
+    if (this.count >= this.size) return true;
+    return this.startedEarly && this.count >= MIN_PLAYERS;
+  }
+
+  /** Can the people currently in the room choose to start without waiting? */
+  get canStartEarly() {
+    return this.state === MATCH_STATE.WAITING && this.count >= MIN_PLAYERS && this.count < this.size;
+  }
+
+  onStartRequest(p) {
+    if (!this.canStartEarly) return;
+    this.startedEarly = true;
+    this.pushEvent({ e: EV.CHAT, id: 0, name: '', team: p.team, msg: `${p.name} 님이 경기를 시작했습니다`, system: 1 });
   }
 
   /**
@@ -801,6 +824,12 @@ export class Room {
       });
     }
   }
+}
+
+function clampRoomSize(v) {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n)) return ROOM_SIZE_DEFAULT;
+  return Math.max(ROOM_SIZE_MIN, Math.min(ROOM_SIZE_MAX, n));
 }
 
 function clampUnit(v) {

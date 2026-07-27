@@ -20,7 +20,12 @@ export const RESPAWN_MS = 5000;
 export const WARMUP_MS = 6000;
 export const POST_MATCH_MS = 15000;
 
-export const MAX_PLAYERS = 12;
+// Match size is chosen per room. A match starts once the room is full, or
+// early if the players in it choose to start with what they have.
+export const ROOM_SIZE_MIN = 2;
+export const ROOM_SIZE_MAX = 6;
+export const ROOM_SIZE_DEFAULT = 2;
+export const MAX_PLAYERS = ROOM_SIZE_MAX;
 export const MAX_NAME_LEN = 14;
 export const MAX_CHAT_LEN = 120;
 
@@ -74,6 +79,7 @@ export const MSG = {
   RELOAD: 'reload',
   ABILITY: 'abil',
   RESPAWN: 'respawn',
+  START: 'start',
   CHAT: 'chat',
   PING: 'ping',
   // server -> client
@@ -98,7 +104,7 @@ export const EV = {
   RELOAD: 'reload',
 };
 
-// A match needs two real players. WAITING is the idle state before that.
+// Fewest players an early start is allowed with.
 export const MIN_PLAYERS = 2;
 
 export const MATCH_STATE = {

@@ -62,6 +62,10 @@ class TestClient {
           this.welcome = msg;
           clearTimeout(timer);
           resolve(msg);
+        } else if (msg.t === MSG.ERROR) {
+          // The browser client surfaces this as a failed join too.
+          clearTimeout(timer);
+          reject(new Error(msg.reason || 'join refused'));
         } else if (msg.t === MSG.SNAPSHOT) {
           this.snapshots.push(msg);
           if (msg.ev?.length) this.events.push(...msg.ev);
@@ -250,6 +254,63 @@ test('two clients in one room see each other and can trade damage', async (t) =>
     assert.ok(hpAfter <= hpBefore, `health should never increase from being shot at (${hpBefore} -> ${hpAfter})`);
     assert.ok(a.last.me.am < 30, 'the attacker should have spent ammo');
   }
+});
+
+test('the room is created at the size the first player asked for', async (t) => {
+  const a = new TestClient();
+  const b = new TestClient();
+  t.after(() => {
+    a.close();
+    b.close();
+  });
+
+  const first = await a.connect({ name: 'HOST', hero: 'ranger', room: 'net-size', size: 4 });
+  assert.equal(first.size, 4, 'the welcome reports the match size');
+  await sleep(300);
+  assert.equal(a.match.need, 4);
+  assert.equal(a.match.state, 'waiting', 'a 4-player match does not start with one player');
+
+  // A later arrival cannot resize a room that already exists.
+  const second = await b.connect({ name: 'GUEST', hero: 'ranger', room: 'net-size', size: 6 });
+  assert.equal(second.size, 4, 'the room keeps the size it was opened with');
+  await sleep(300);
+  assert.equal(b.match.state, 'waiting', 'still short of four players');
+  assert.equal(b.match.canStart, 1, 'but the two of them may start early');
+});
+
+test('a room refuses players once it is full', async (t) => {
+  const clients = [new TestClient(), new TestClient()];
+  t.after(() => clients.forEach((c) => c.close()));
+
+  await clients[0].connect({ name: 'ONE', hero: 'ranger', room: 'net-full', size: 2 });
+  await clients[1].connect({ name: 'TWO', hero: 'ranger', room: 'net-full', size: 2 });
+  await sleep(300);
+
+  const extra = new TestClient();
+  t.after(() => extra.close());
+  await assert.rejects(
+    () => extra.connect({ name: 'THREE', hero: 'ranger', room: 'net-full', size: 2 }),
+    /정원|full/,
+    'the third player should be turned away',
+  );
+});
+
+test('an early start request moves a half-full room into a match', async (t) => {
+  const a = new TestClient();
+  const b = new TestClient();
+  t.after(() => {
+    a.close();
+    b.close();
+  });
+  await a.connect({ name: 'A', hero: 'ranger', room: 'net-early', size: 6 });
+  await b.connect({ name: 'B', hero: 'ranger', room: 'net-early', size: 6 });
+  await sleep(400);
+  assert.equal(a.match.state, 'waiting');
+
+  a.send({ t: MSG.START });
+  await sleep(400);
+  assert.ok(['warmup', 'live'].includes(a.match.state), `expected the match to start, got ${a.match.state}`);
+  assert.equal(a.match.canStart, 0, 'the offer disappears once it is taken');
 });
 
 test('chat is delivered to everyone in the room', async (t) => {

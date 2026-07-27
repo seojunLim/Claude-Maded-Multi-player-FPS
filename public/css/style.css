@@ -127,6 +127,21 @@ input[type="text"], #nameinput, #roominput, #chatfield {
 .hero .abil { margin-top: 9px; padding-top: 9px; border-top: 1px dashed var(--line); font-size: 11.5px; color: var(--dim); }
 .hero .abil b { color: var(--hc); }
 
+.sizepick { display: block; margin-top: 16px; }
+.sizepick > span { display: block; font-size: 11px; letter-spacing: 0.14em; color: var(--dim); margin-bottom: 6px; text-transform: uppercase; }
+#sizebtns { display: flex; gap: 8px; flex-wrap: wrap; }
+.sizebtn {
+  flex: 1 1 0; min-width: 56px;
+  font-family: var(--mono); font-size: 15px; font-weight: 600;
+  color: var(--ink); cursor: pointer;
+  background: rgba(3, 7, 14, 0.65);
+  border: 1px solid var(--line); border-radius: 9px;
+  padding: 10px 0;
+}
+.sizebtn:hover { border-color: rgba(150, 190, 240, 0.45); }
+.sizebtn.on { border-color: var(--t0); color: #e0f2fe; background: rgba(56, 189, 248, 0.16); box-shadow: 0 0 0 1px var(--t0); }
+.sizepick em { display: block; margin-top: 7px; font-size: 11.5px; color: var(--dim); font-style: normal; }
+
 .settings { margin-top: 20px; align-items: flex-end; }
 .slider { flex: 1 1 200px; }
 .slider input { width: 100%; accent-color: var(--t0); }
@@ -294,7 +309,7 @@ kbd {
 #killbanner.on, #streakbanner.on { opacity: 1; }
 #streakbanner { top: 24%; font-size: 24px; font-weight: 700; letter-spacing: 0.16em; color: var(--warn); text-shadow: 0 2px 24px rgba(0, 0, 0, 0.9); }
 
-#deadscreen { position: absolute; inset: 0; background: rgba(4, 7, 12, 0.62); display: grid; place-items: center; backdrop-filter: grayscale(0.6) blur(2px); }
+#deadscreen { position: absolute; inset: 0; z-index: 30; background: rgba(4, 7, 12, 0.62); display: grid; place-items: center; backdrop-filter: grayscale(0.6) blur(2px); }
 .dead-inner { text-align: center; pointer-events: auto; }
 #deadby { font-size: 15px; letter-spacing: 0.16em; color: var(--t1); margin-bottom: 14px; }
 #respawnring {
@@ -315,6 +330,7 @@ kbd {
 /* ───────────────────── 플레이어 대기 (사람 전용 매치) ───────────────────── */
 #waiting {
   position: absolute; left: 50%; top: 14%;
+  z-index: 30;
   transform: translateX(-50%);
   pointer-events: auto;
   background: rgba(6, 10, 18, 0.86);
@@ -349,6 +365,14 @@ kbd {
   border: none; border-radius: 7px; padding: 7px 14px;
 }
 #waitcopy.done { background: var(--hp); }
+#startnow {
+  margin-top: 11px; pointer-events: auto; cursor: pointer;
+  font-family: var(--mono); font-size: 12px; letter-spacing: 0.12em;
+  color: #04121c; background: var(--warn);
+  border: none; border-radius: 8px; padding: 9px 18px;
+}
+#startnow:hover { filter: brightness(1.08); }
+
 .wait-hint { margin: 10px 0 0; font-size: 10.5px; color: var(--dim); letter-spacing: 0.08em; }
 body.touch-mode #waiting { top: 8%; padding: 10px 14px; }
 body.touch-mode #waitcount { font-size: 20px; margin: 4px 0 7px; }
@@ -381,6 +405,7 @@ body.touch-mode #respawnbtn { display: block; }
 
 #scoreboard {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  z-index: 30;
   width: min(920px, 94vw); background: rgba(6, 10, 18, 0.93);
   border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px;
   box-shadow: 0 40px 100px rgba(0, 0, 0, 0.7);
@@ -401,7 +426,7 @@ body.touch-mode #respawnbtn { display: block; }
 .sb-team td .bot { font-size: 9px; color: var(--dim); border: 1px solid var(--line); border-radius: 4px; padding: 0 3px; margin-left: 5px; }
 .sb-foot { margin-top: 12px; font-size: 10px; letter-spacing: 0.14em; color: var(--dim); text-align: center; }
 
-#matchover { position: absolute; inset: 0; background: rgba(3, 6, 11, 0.8); display: grid; place-items: center; }
+#matchover { position: absolute; inset: 0; z-index: 30; background: rgba(3, 6, 11, 0.8); display: grid; place-items: center; }
 .mo-inner { text-align: center; }
 #mo-result { font-size: 58px; font-weight: 800; letter-spacing: 0.2em; }
 #mo-result.win { color: var(--hp); text-shadow: 0 0 50px rgba(94, 234, 212, 0.4); }
@@ -411,7 +436,7 @@ body.touch-mode #respawnbtn { display: block; }
 .mo-hint { margin-top: 22px; font-size: 11px; color: var(--dim); letter-spacing: 0.16em; }
 
 #chatinput {
-  position: absolute; left: 20px; bottom: 130px; display: flex; align-items: center; gap: 8px;
+  position: absolute; left: 20px; bottom: 130px; z-index: 32; display: flex; align-items: center; gap: 8px;
   pointer-events: auto; background: rgba(5, 9, 16, 0.9); border: 1px solid var(--t0);
   border-radius: 8px; padding: 6px 10px; width: min(440px, 60vw);
 }
@@ -513,6 +538,7 @@ body.can-touch .touch-only { display: flex; }
 }
 
 #touch.dead #tright, #touch.dead #tstick, #touch.dead #tstickzone { opacity: 0.25; pointer-events: none; }
+#touch.dead #tlook { pointer-events: none; }
 
 /* A landscape phone is often wider than 760px, so the HUD has to make room for
    the thumbs based on the control scheme rather than on the viewport width. */

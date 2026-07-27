@@ -60,6 +60,7 @@ export class Hud {
       waitcount: $('waitcount'),
       waitlink: $('waitlink'),
       waitcopy: $('waitcopy'),
+      startnow: $('startnow'),
       fps: $('fps'),
       ping: $('pingtag'),
       lockhint: $('lockhint'),
@@ -311,6 +312,16 @@ export class Hud {
     if (!this.el.waitlink.textContent) {
       this.el.waitlink.textContent = `${location.origin}/?room=${encodeURIComponent(this.roomName || '')}`;
     }
+    // Offered once there are enough people to fight, but before the room fills.
+    this.el.startnow.classList.toggle('hidden', !info.canStart);
+    // Touch players tap the button; on a mouse the pointer is locked to the
+    // canvas, so the key is the only way to reach this without pressing Esc.
+    const key = document.body.classList.contains('touch-mode') ? '' : ' (F)';
+    this.el.startnow.textContent = `${have}명으로 지금 시작${key}`;
+  }
+
+  onStartNow(fn) {
+    this.el.startnow.addEventListener('click', fn);
   }
 
   setRoomName(name) {

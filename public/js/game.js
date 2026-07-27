@@ -180,6 +180,8 @@ export class Game {
       if (text) this.net.send({ t: MSG.CHAT, msg: text });
     });
 
+    this.hud.onStartNow(() => this.net.send({ t: MSG.START }));
+
     this.hud.onRespawn(() => {
       if (this.me.rs <= 0) this.net.send({ t: MSG.RESPAWN, hero: this.pendingHero });
     });
@@ -601,6 +603,8 @@ export class Game {
 
     if (this.input.take('reload')) this.requestReload();
     if (this.input.take('ability')) this.net.send({ t: MSG.ABILITY });
+    // Ignored by the server unless the room is actually waiting on players.
+    if (this.input.take('start')) this.net.send({ t: MSG.START });
 
     if (!this.alive) {
       if (this.input.take('respawn') && this.me.rs <= 0) {

@@ -1,6 +1,7 @@
 // Menu, settings and boot sequence.
 
 import { HEROES } from '/shared/heroes.js';
+import { ROOM_SIZE_MIN, ROOM_SIZE_MAX, ROOM_SIZE_DEFAULT } from '/shared/constants.js';
 import { Net } from './net.js';
 import { Input } from './input.js';
 import { Sfx } from './audio.js';
@@ -26,6 +27,7 @@ const defaults = {
   invertY: false,
   shadows: !TOUCH_DEVICE,
   autoFire: true,
+  size: ROOM_SIZE_DEFAULT,
   // Not user facing: tells the renderer to use a mobile budget.
   mobile: TOUCH_DEVICE,
 };
@@ -88,6 +90,41 @@ function markHero() {
   for (const card of $('heroes').children) {
     card.classList.toggle('on', card.dataset.hero === settings.hero);
   }
+}
+
+/* ------------------------------------------------------------- match size */
+
+function renderSizePicker() {
+  const wrap = $('sizebtns');
+  wrap.innerHTML = '';
+  for (let n = ROOM_SIZE_MIN; n <= ROOM_SIZE_MAX; n++) {
+    const b = document.createElement('button');
+    b.className = 'sizebtn';
+    b.type = 'button';
+    b.dataset.size = String(n);
+    b.textContent = `${n}명`;
+    wrap.appendChild(b);
+  }
+  wrap.addEventListener('click', (e) => {
+    const btn = e.target.closest('.sizebtn');
+    if (!btn) return;
+    settings.size = Number(btn.dataset.size);
+    saveSettings();
+    markSize();
+  });
+  markSize();
+}
+
+function markSize() {
+  for (const b of $('sizebtns').children) {
+    b.classList.toggle('on', Number(b.dataset.size) === settings.size);
+  }
+  // The size only applies to a match this player creates; an existing room
+  // keeps whatever it was opened with.
+  $('sizenote').textContent =
+    settings.size === ROOM_SIZE_MIN
+      ? `${settings.size}명이 모이면 바로 시작합니다`
+      : `${settings.size}명이 모이면 시작합니다 · 인원이 덜 모여도 대기 화면에서 바로 시작할 수 있습니다`;
 }
 
 /* --------------------------------------------------------------- controls */
@@ -221,10 +258,12 @@ async function refreshRooms() {
       row.type = 'button';
       row.dataset.room = r.name;
       const bots = r.bots ? ` <span class="rstate">+봇 ${r.bots}</span>` : '';
+      const full = r.players >= r.size;
       row.innerHTML =
         `<span class="rname">${escapeHtml(r.name)}</span>` +
-        `<span class="rcount">${r.players}명</span>${bots}` +
-        `<span class="rstate">${STATE_LABEL[r.state] || ''}</span>`;
+        `<span class="rcount">${r.players}/${r.size}명</span>${bots}` +
+        `<span class="rstate">${full ? '정원 초과' : STATE_LABEL[r.state] || ''}</span>`;
+      row.disabled = full;
       row.addEventListener('click', () => {
         $('roominput').value = r.name;
         $('roominput').dispatchEvent(new Event('input'));
@@ -284,6 +323,7 @@ async function startGame() {
       name: settings.name,
       hero: settings.hero,
       room: settings.room,
+      size: settings.size,
     });
 
     game = new Game({ canvas, net, welcome, hud, sfx, input, settings });
@@ -319,4 +359,5 @@ async function startGame() {
 }
 
 renderHeroes();
+renderSizePicker();
 bindMenu();

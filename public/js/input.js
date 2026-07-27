@@ -33,7 +33,7 @@ export class Input {
     this.firePressed = false;
     this.zooming = false;
     this.typing = false;
-    this.actions = { reload: 0, ability: 0, respawn: 0 };
+    this.actions = { reload: 0, ability: 0, respawn: 0, start: 0 };
     this.onKey = null; // (code, event) => boolean  — return true to swallow
     this.onLockChange = null;
     this.onTouchUi = null; // (what, on) => void
@@ -186,6 +186,9 @@ export class Input {
         e.preventDefault();
       }
       if (e.code === 'KeyR') this.actions.reload = 1;
+      // Starting a match early has to be a key: while the pointer is locked the
+      // mouse belongs to the canvas and cannot reach the lobby panel's buttons.
+      if (e.code === 'KeyF') this.actions.start = 1;
       if (e.code === 'KeyQ') this.actions.ability = 1;
       if (e.code === 'Space') this.actions.respawn = 1;
     });
