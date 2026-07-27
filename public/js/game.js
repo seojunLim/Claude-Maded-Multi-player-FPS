@@ -46,6 +46,7 @@ export class Game {
     this.selfId = welcome.id;
     this.selfTeam = welcome.team;
     this.heroId = welcome.hero;
+    this.roomName = welcome.room;
 
     this.map = buildMap();
     this.world = makeWorld(this.map);
@@ -194,6 +195,7 @@ export class Game {
     this.running = true;
     this.hud.show();
     this.hud.setSelf(this.selfId, this.selfTeam);
+    this.hud.setRoomName(this.roomName);
     this.hud.setHero(this.heroId);
     this.hud.setLockHint(!this.input.locked && !this.input.touchMode);
     this.loop();

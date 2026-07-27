@@ -17,7 +17,7 @@ RUN test -f public/vendor/three/three.module.min.js || npm run vendor
 
 ENV NODE_ENV=production
 ENV PORT=8080
-ENV BOTS=6
+ENV BOTS=0
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \

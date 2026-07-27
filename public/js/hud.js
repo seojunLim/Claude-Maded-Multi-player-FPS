@@ -56,6 +56,10 @@ export class Hud {
       chatfield: $('chatfield'),
       chatsend: $('chatsend'),
       touch: $('touch'),
+      waiting: $('waiting'),
+      waitcount: $('waitcount'),
+      waitlink: $('waitlink'),
+      waitcopy: $('waitcopy'),
       fps: $('fps'),
       ping: $('pingtag'),
       lockhint: $('lockhint'),
@@ -65,7 +69,9 @@ export class Hud {
     this.roster = new Map();
     this.hitTimer = 0;
     this.lastHp = 0;
+    this.roomName = '';
     this.buildHeroButtons();
+    this.bindCopyLink();
   }
 
   show() {
@@ -278,19 +284,69 @@ export class Hud {
     this.el.score1.textContent = info.scores[1];
     this.el.sbScore.innerHTML = `<span style="color:${TEAMS[0].cssColor}">${info.scores[0]}</span> : <span style="color:${TEAMS[1].cssColor}">${info.scores[1]}</span>`;
     const label = {
-      [MATCH_STATE.WARMUP]: '준비 중',
+      [MATCH_STATE.WAITING]: '플레이어 대기 중',
+      [MATCH_STATE.WARMUP]: '곧 시작',
       [MATCH_STATE.LIVE]: `선착 ${SCORE_LIMIT}킬`,
       [MATCH_STATE.OVER]: '경기 종료',
     };
+    this.matchState = info.state;
     this.el.matchstate.textContent = label[info.state] || '';
     this.roster = new Map(info.roster.map((r) => [r.id, r]));
     this.renderScoreboard(info);
 
     if (info.state === MATCH_STATE.OVER) this.showMatchOver(info);
     else this.el.matchover.classList.add('hidden');
+
+    this.setWaiting(info);
+  }
+
+  /** The lobby panel shown while a room does not have enough real players. */
+  setWaiting(info) {
+    const waiting = info.state === MATCH_STATE.WAITING;
+    this.el.waiting.classList.toggle('hidden', !waiting);
+    if (!waiting) return;
+    const have = info.humans ?? 0;
+    const need = info.need ?? 2;
+    this.el.waitcount.textContent = `${have} / ${need}명`;
+    if (!this.el.waitlink.textContent) {
+      this.el.waitlink.textContent = `${location.origin}/?room=${encodeURIComponent(this.roomName || '')}`;
+    }
+  }
+
+  setRoomName(name) {
+    this.roomName = name;
+    this.el.waitlink.textContent = `${location.origin}/?room=${encodeURIComponent(name)}`;
+  }
+
+  bindCopyLink() {
+    this.el.waitcopy.addEventListener('click', async () => {
+      const link = this.el.waitlink.textContent;
+      try {
+        await navigator.clipboard.writeText(link);
+      } catch {
+        // Clipboard access can be denied (insecure origin, permissions) — fall
+        // back to selecting the text so it can be copied by hand.
+        const range = document.createRange();
+        range.selectNodeContents(this.el.waitlink);
+        const sel = getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+      this.el.waitcopy.classList.add('done');
+      this.el.waitcopy.textContent = '복사됨';
+      setTimeout(() => {
+        this.el.waitcopy.classList.remove('done');
+        this.el.waitcopy.textContent = '복사';
+      }, 1600);
+    });
   }
 
   setClock(ms) {
+    // Nothing is counting down while a room waits for players.
+    if (this.matchState === MATCH_STATE.WAITING) {
+      this.el.timer.textContent = '--:--';
+      return;
+    }
     const s = Math.max(0, Math.floor(ms / 1000));
     this.el.timer.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   }

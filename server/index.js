@@ -14,7 +14,8 @@ import { Room } from './room.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 const PORT = Number(process.env.PORT) || 3000;
-const BOTS = process.env.BOTS === undefined ? 6 : Number(process.env.BOTS);
+// Humans only by default. Set BOTS=n to fill empty slots with practice bots.
+const BOTS = process.env.BOTS === undefined ? 0 : Number(process.env.BOTS);
 const MAX_MESSAGE_BYTES = 4096;
 
 const app = express();
@@ -28,7 +29,7 @@ function getRoom(name) {
   const key = String(name || 'sanctum').toLowerCase().replace(/[^a-z0-9-_]/g, '').slice(0, 20) || 'sanctum';
   let room = rooms.get(key);
   if (!room) {
-    room = new Room(key, { bots: Number.isFinite(BOTS) ? BOTS : 6 });
+    room = new Room(key, { bots: Number.isFinite(BOTS) ? BOTS : 0 });
     rooms.set(key, room);
     console.log(`[room] created "${key}"`);
   }
@@ -180,5 +181,6 @@ server.listen(PORT, () => {
       }
     }
   }
-  console.log(`  bots per match: ${Number.isFinite(BOTS) ? BOTS : 6}`);
+  const bots = Number.isFinite(BOTS) ? BOTS : 0;
+  console.log(`  bots per match: ${bots}${bots === 0 ? ' (humans only)' : ' (practice)'}`);
 });

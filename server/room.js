@@ -13,6 +13,7 @@ import {
   WARMUP_MS,
   POST_MATCH_MS,
   MAX_PLAYERS,
+  MIN_PLAYERS,
   MSG,
   EV,
   KEY,
@@ -51,9 +52,9 @@ export class Room {
     this.tick = 0;
     this.events = [];
     this.scores = [0, 0];
-    this.state = MATCH_STATE.WARMUP;
-    this.stateEndsAt = Date.now() + WARMUP_MS;
-    this.botTarget = opts.bots ?? 6;
+    this.state = MATCH_STATE.WAITING;
+    this.stateEndsAt = 0;
+    this.botTarget = opts.bots ?? 0;
     this.lastBotCheck = 0;
     this.rosterDirty = true;
     this.snapAccumulator = 0;
@@ -277,6 +278,8 @@ export class Room {
       endsIn: Math.max(0, this.stateEndsAt - Date.now()),
       limit: SCORE_LIMIT,
       map: this.map.name,
+      humans: this.humanCount,
+      need: MIN_PLAYERS,
       roster: this.roster(),
     };
   }
@@ -583,10 +586,9 @@ export class Room {
     this.broadcast(this.matchInfo());
   }
 
+  /** Wipes the scoreboard and puts everyone back at spawn for a fresh match. */
   resetMatch() {
     this.scores = [0, 0];
-    this.state = MATCH_STATE.LIVE;
-    this.stateEndsAt = Date.now() + MATCH_DURATION_MS;
     for (const p of this.players.values()) {
       p.kills = 0;
       p.deaths = 0;
@@ -597,23 +599,62 @@ export class Room {
       p.autoSpawnAt = p.respawnAt;
     }
     this.rosterDirty = true;
+  }
+
+  setState(state, durationMs) {
+    this.state = state;
+    this.stateEndsAt = Date.now() + durationMs;
+    this.rosterDirty = true;
     this.broadcast(this.matchInfo());
   }
 
+  /** Enough players present for a real match? */
+  get canPlay() {
+    return this.count >= MIN_PLAYERS;
+  }
+
+  /**
+   * A match only runs with real opponents in the room. On your own you can
+   * still spawn and move around, but nothing is scored — the room sits in
+   * WAITING until someone else joins, and drops back there if they leave.
+   */
   updateMatchState() {
     const now = Date.now();
-    if (this.state === MATCH_STATE.WARMUP) {
-      if (now >= this.stateEndsAt) {
-        this.state = MATCH_STATE.LIVE;
-        this.stateEndsAt = now + MATCH_DURATION_MS;
-        this.scores = [0, 0];
-        this.rosterDirty = true;
-        this.broadcast(this.matchInfo());
-      }
-    } else if (this.state === MATCH_STATE.LIVE) {
-      if (now >= this.stateEndsAt) this.endMatch();
-    } else if (this.state === MATCH_STATE.OVER) {
-      if (now >= this.stateEndsAt) this.resetMatch();
+    const ready = this.canPlay;
+
+    switch (this.state) {
+      case MATCH_STATE.WAITING:
+        if (ready) {
+          this.resetMatch();
+          this.setState(MATCH_STATE.WARMUP, WARMUP_MS);
+        }
+        break;
+
+      case MATCH_STATE.WARMUP:
+        if (!ready) this.setState(MATCH_STATE.WAITING, 0);
+        else if (now >= this.stateEndsAt) {
+          this.resetMatch();
+          this.setState(MATCH_STATE.LIVE, MATCH_DURATION_MS);
+        }
+        break;
+
+      case MATCH_STATE.LIVE:
+        // The last opponent leaving abandons the match rather than handing out
+        // a win against nobody.
+        if (!ready) this.setState(MATCH_STATE.WAITING, 0);
+        else if (now >= this.stateEndsAt) this.endMatch();
+        break;
+
+      case MATCH_STATE.OVER:
+        if (now >= this.stateEndsAt) {
+          this.resetMatch();
+          this.setState(ready ? MATCH_STATE.WARMUP : MATCH_STATE.WAITING, ready ? WARMUP_MS : 0);
+        }
+        break;
+
+      default:
+        this.setState(MATCH_STATE.WAITING, 0);
+        break;
     }
   }
 

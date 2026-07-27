@@ -312,6 +312,63 @@ kbd {
 .dh:hover { border-color: var(--ink); }
 .dh.on { border-color: var(--hc); color: var(--hc); box-shadow: 0 0 0 1px var(--hc); }
 
+/* ───────────────────── 플레이어 대기 (사람 전용 매치) ───────────────────── */
+#waiting {
+  position: absolute; left: 50%; top: 14%;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  background: rgba(6, 10, 18, 0.86);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px 22px;
+  text-align: center;
+  max-width: min(460px, 92vw);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+}
+.wait-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--warn); margin: 0 auto 9px;
+  animation: waitpulse 1.2s ease-in-out infinite;
+}
+@keyframes waitpulse { 50% { opacity: 0.25; transform: scale(0.7); } }
+.wait-title { font-size: 13px; letter-spacing: 0.16em; color: var(--ink); }
+#waitcount { font-size: 26px; font-weight: 700; margin: 6px 0 10px; color: var(--warn); }
+.wait-desc { margin: 0 0 8px; font-size: 11.5px; color: var(--dim); letter-spacing: 0.04em; }
+.wait-row { display: flex; gap: 8px; align-items: stretch; justify-content: center; }
+#waitlink {
+  flex: 1 1 auto; min-width: 0;
+  font-size: 11px; color: var(--t0);
+  background: rgba(3, 7, 14, 0.7); border: 1px dashed var(--line);
+  border-radius: 7px; padding: 7px 9px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#waitcopy {
+  pointer-events: auto; cursor: pointer;
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
+  color: #04121c; background: var(--t0);
+  border: none; border-radius: 7px; padding: 7px 14px;
+}
+#waitcopy.done { background: var(--hp); }
+.wait-hint { margin: 10px 0 0; font-size: 10.5px; color: var(--dim); letter-spacing: 0.08em; }
+body.touch-mode #waiting { top: 8%; padding: 10px 14px; }
+body.touch-mode #waitcount { font-size: 20px; margin: 4px 0 7px; }
+body.touch-mode .wait-hint { display: none; }
+
+/* 메뉴의 매치 목록 */
+#roomlist { display: flex; flex-direction: column; gap: 6px; }
+.roomrow {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; text-align: left; cursor: pointer;
+  font: inherit; color: var(--ink);
+  background: rgba(3, 7, 14, 0.55);
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 11px;
+}
+.roomrow:hover { border-color: var(--t0); }
+.roomrow .rname { flex: 1; font-family: var(--mono); font-size: 12.5px; }
+.roomrow .rcount { font-family: var(--mono); font-size: 12px; color: var(--hp); }
+.roomrow .rstate { font-size: 10px; color: var(--dim); letter-spacing: 0.1em; }
+
 #respawnbtn {
   display: none;
   pointer-events: auto;

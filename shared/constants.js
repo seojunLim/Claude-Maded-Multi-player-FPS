@@ -98,4 +98,12 @@ export const EV = {
   RELOAD: 'reload',
 };
 
-export const MATCH_STATE = { WARMUP: 'warmup', LIVE: 'live', OVER: 'over' };
+// A match needs two real players. WAITING is the idle state before that.
+export const MIN_PLAYERS = 2;
+
+export const MATCH_STATE = {
+  WAITING: 'waiting',
+  WARMUP: 'warmup',
+  LIVE: 'live',
+  OVER: 'over',
+};

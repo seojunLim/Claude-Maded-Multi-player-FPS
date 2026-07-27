@@ -105,6 +105,20 @@
         </div>
       </div>
 
+      <div id="waiting" class="hidden">
+        <div class="wait-inner">
+          <div class="wait-dot"></div>
+          <div class="wait-title">다른 플레이어를 기다리는 중</div>
+          <div id="waitcount">1 / 2명</div>
+          <p class="wait-desc">아래 링크를 보내면 같은 매치에서 만납니다</p>
+          <div class="wait-row">
+            <code id="waitlink"></code>
+            <button id="waitcopy" type="button">복사</button>
+          </div>
+          <p class="wait-hint">기다리는 동안 맵을 자유롭게 돌아다닐 수 있습니다</p>
+        </div>
+      </div>
+
       <div id="chatinput" class="hidden">
         <span>전체</span>
         <input id="chatfield" maxlength="120" autocomplete="off" enterkeyhint="send" />
@@ -211,13 +225,15 @@
               <li>헤드샷은 무기에 따라 1.5~2.2배 피해.</li>
               <li>사망 후 5초 뒤 부활, 부활 시 영웅 교체 가능.</li>
               <li>서버가 모든 판정을 처리하고 <b>지연 보상</b>을 적용합니다.</li>
-              <li>빈 자리는 봇이 채워 언제든 바로 플레이할 수 있습니다.</li>
+              <li><b>사람 2명 이상</b>이 모여야 경기가 시작됩니다 (봇 없음).</li>
             </ul>
           </div>
           <div class="card">
             <h3>같이 하기</h3>
-            <p class="small">같은 <b>매치 코드</b>를 입력하면 친구와 같은 서버에서 만납니다. 아래 주소를 공유하세요.</p>
+            <p class="small">봇은 없습니다. <b>사람이 2명 이상</b> 모여야 경기가 시작됩니다. 같은 <b>매치 코드</b>를 쓰거나 아래 주소를 공유하세요.</p>
             <div id="sharelink"></div>
+            <h3 style="margin-top:14px">진행 중인 매치</h3>
+            <div id="roomlist"><p class="small">불러오는 중…</p></div>
             <p class="small" id="serverinfo">서버 상태 확인 중…</p>
           </div>
         </div>

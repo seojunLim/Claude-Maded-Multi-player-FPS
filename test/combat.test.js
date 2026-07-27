@@ -261,6 +261,67 @@ test('fall damage applies from a long drop', async (t) => {
   assert.ok(a.hp < hp0 || !a.alive, `expected fall damage, hp ${hp0} -> ${a.hp}`);
 });
 
+/* ------------------------------------------------------- humans-only flow */
+
+test('a room has no bots unless they are asked for', async (t) => {
+  const room = new Room('bots-off', {});
+  t.after(() => room.destroy());
+  room.addPlayer({ name: 'SOLO', heroId: 'ranger', socket: null });
+  await sleep(1800); // past the bot top-up interval
+  assert.equal(room.count, 1, 'nobody should have been added');
+  assert.equal(room.count - room.humanCount, 0, 'no bots');
+});
+
+test('a lone player waits instead of starting a match', async (t) => {
+  const room = new Room('lonely', { bots: 0 });
+  t.after(() => room.destroy());
+  assert.equal(room.state, MATCH_STATE.WAITING, 'an empty room waits');
+
+  const solo = room.addPlayer({ name: 'SOLO', heroId: 'ranger', socket: null });
+  await sleep(300);
+  assert.equal(room.state, MATCH_STATE.WAITING, 'one player is not a match');
+  assert.equal(solo.alive, true, 'but they can still spawn and move around');
+
+  const info = room.matchInfo();
+  assert.equal(info.humans, 1);
+  assert.equal(info.need, 2);
+});
+
+test('a second player starts the match, and leaving abandons it', async (t) => {
+  const room = new Room('pair', { bots: 0 });
+  t.after(() => room.destroy());
+  const a = room.addPlayer({ name: 'A', heroId: 'ranger', socket: null, team: 0 });
+  await sleep(200);
+  assert.equal(room.state, MATCH_STATE.WAITING);
+
+  const b = room.addPlayer({ name: 'B', heroId: 'ranger', socket: null, team: 1 });
+  await sleep(200);
+  assert.equal(room.state, MATCH_STATE.WARMUP, 'two players kick off the warmup');
+
+  // Warmup runs down into a live match with a clean scoreboard.
+  a.kills = 5;
+  room.stateEndsAt = Date.now() - 1;
+  await sleep(120);
+  assert.equal(room.state, MATCH_STATE.LIVE);
+  assert.deepEqual(room.scores, [0, 0]);
+  assert.equal(a.kills, 0, 'stats reset when the match actually starts');
+
+  room.removePlayer(b.id);
+  await sleep(200);
+  assert.equal(room.state, MATCH_STATE.WAITING, 'the last opponent leaving abandons the match');
+});
+
+test('kills before the match starts do not score', async (t) => {
+  const { room, a, v } = duel();
+  t.after(() => room.destroy());
+  room.state = MATCH_STATE.WAITING;
+  room.scores = [0, 0];
+
+  room.kill(v, a, false, 'TEST');
+  assert.deepEqual(room.scores, [0, 0], 'no team score outside a live match');
+  assert.equal(a.kills, 1, 'personal stats still track for the warmup scoreboard');
+});
+
 test('the match ends when the score limit is reached', async (t) => {
   const { room, a } = duel();
   t.after(() => room.destroy());

@@ -26,6 +26,6 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
-      # 방마다 빈자리를 채울 봇 수. 0 이면 사람만 플레이합니다.
+      # 사람끼리만 플레이합니다. 연습용 봇을 넣으려면 0 보다 큰 값으로.
       - key: BOTS
-        value: "6"
+        value: "0"

@@ -186,15 +186,60 @@ function bindMenu() {
     if (e.key === 'Enter') startGame();
   });
 
-  fetch('/api/status')
-    .then((r) => r.json())
-    .then((s) => {
-      const total = s.rooms.reduce((n, r) => n + r.players, 0);
-      $('serverinfo').textContent = `서버 정상 · 접속자 ${total}명 · 진행 중인 매치 ${s.rooms.length}개`;
-    })
-    .catch(() => {
-      $('serverinfo').textContent = '서버 상태를 확인할 수 없습니다.';
-    });
+  refreshRooms();
+  // With no bots to fill seats, finding the other players is the whole game,
+  // so the list keeps itself current while the menu is open.
+  setInterval(() => {
+    if (!$('menu').classList.contains('hidden')) refreshRooms();
+  }, 5000);
+}
+
+const STATE_LABEL = {
+  waiting: '대기 중',
+  warmup: '곧 시작',
+  live: '진행 중',
+  over: '종료',
+};
+
+async function refreshRooms() {
+  const list = $('roomlist');
+  try {
+    const s = await (await fetch('/api/status')).json();
+    const rooms = s.rooms.filter((r) => r.players > 0).sort((a, b) => b.players - a.players);
+    const total = s.rooms.reduce((n, r) => n + r.players, 0);
+    $('serverinfo').textContent = `서버 정상 · 접속자 ${total}명 · 진행 중인 매치 ${rooms.length}개`;
+
+    if (!rooms.length) {
+      list.innerHTML =
+        '<p class="small">아직 아무도 없습니다. 매치 코드를 정하고 위 주소를 친구에게 보내세요.</p>';
+      return;
+    }
+    list.innerHTML = '';
+    for (const r of rooms) {
+      const row = document.createElement('button');
+      row.className = 'roomrow';
+      row.type = 'button';
+      row.dataset.room = r.name;
+      const bots = r.bots ? ` <span class="rstate">+봇 ${r.bots}</span>` : '';
+      row.innerHTML =
+        `<span class="rname">${escapeHtml(r.name)}</span>` +
+        `<span class="rcount">${r.players}명</span>${bots}` +
+        `<span class="rstate">${STATE_LABEL[r.state] || ''}</span>`;
+      row.addEventListener('click', () => {
+        $('roominput').value = r.name;
+        $('roominput').dispatchEvent(new Event('input'));
+        startGame();
+      });
+      list.appendChild(row);
+    }
+  } catch {
+    list.innerHTML = '<p class="small">매치 목록을 불러오지 못했습니다.</p>';
+    $('serverinfo').textContent = '서버 상태를 확인할 수 없습니다.';
+  }
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 /* ------------------------------------------------------------------- boot */
