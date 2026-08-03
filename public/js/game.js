@@ -360,8 +360,16 @@ export class Game {
   }
 
   remoteShot(ev) {
-    const origin = { x: ev.x, y: ev.y, z: ev.z };
     const hero = getHero(ev.hero);
+    const av = this.avatars.get(ev.id);
+    // Tracers leave the barrel of the model the shooter is actually holding;
+    // the server only knows about their eye position.
+    let origin = { x: ev.x, y: ev.y, z: ev.z };
+    if (av && av.group.visible) {
+      const m = av.muzzleWorld(this.tmpVec);
+      origin = { x: m.x, y: m.y, z: m.z };
+      av.fired();
+    }
     for (const t of ev.tr || []) {
       const end = { x: t[0], y: t[1], z: t[2] };
       this.effects.tracer(origin, end, hero.color);
@@ -689,6 +697,7 @@ export class Game {
     }
 
     this.effects.muzzle(muzzle, dir, hero.id === 'sentinel' ? 1.6 : 1);
+    this.effects.brass(this.viewmodel.ejectWorld(new THREE.Vector3()), this.input.yaw);
     this.viewmodel.kick(w.recoil);
     this.sfx.shot(hero.id, null, null, true);
 
@@ -772,7 +781,10 @@ export class Game {
       let av = this.avatars.get(id);
       if (!av) {
         const info = this.hud.roster.get(id);
-        av = new Avatar({ id, team: state.team, hero: info?.hero || 'ranger', name: info?.name || '' });
+        av = new Avatar(
+          { id, team: state.team, hero: info?.hero || 'ranger', name: info?.name || '' },
+          { detail: !this.settings.mobile },
+        );
         this.avatars.set(id, av);
         this.stage.scene.add(av.group);
         if (info) av.setInfo(info);

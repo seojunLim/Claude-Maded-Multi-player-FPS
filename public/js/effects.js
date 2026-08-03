@@ -314,6 +314,24 @@ export class Effects {
     }
   }
 
+  /** A spent case tumbling out of the ejection port. */
+  brass(pos, yaw) {
+    // Out to the shooter's right and slightly back, like a real ejection arc.
+    const rx = Math.cos(yaw);
+    const rz = -Math.sin(yaw);
+    this.particle(
+      pos.x,
+      pos.y,
+      pos.z,
+      rx * (1.6 + Math.random() * 0.8) + (Math.random() - 0.5) * 0.4,
+      1.2 + Math.random() * 0.8,
+      rz * (1.6 + Math.random() * 0.8) + (Math.random() - 0.5) * 0.4,
+      0xd9a441,
+      0.75,
+      9,
+    );
+  }
+
   ring(pos, { color = 0xffffff, from = 0.4, to = 6, life = 0.5, flat = true } = {}) {
     const r = this.rings[this.ringNext++ % RINGS];
     r.mesh.visible = true;

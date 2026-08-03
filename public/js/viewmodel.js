@@ -1,58 +1,31 @@
-// First-person weapon model with sway, bob, recoil, reload and ADS.
+// First-person weapon: the same model the avatars carry, plus gloved hands,
+// sway, bob, recoil, a reload sequence and true sight-aligned aiming.
 
 import * as THREE from 'three';
-import { getHero } from '/shared/heroes.js';
+import { buildWeapon } from './weapons.js';
+import { pbr } from './materials.js';
+import { Bucket, box, cyl, capsule } from './parts.js';
 
-// Pushed back and scaled down so a 90° FOV does not turn the weapon into a
-// wall across the bottom of the screen.
-const REST = new THREE.Vector3(0.3, -0.26, -0.72);
-const ADS = new THREE.Vector3(0.0, -0.15, -0.52);
-const VIEWMODEL_SCALE = 0.82;
+// Hip and aim placement in view space (the weapon camera sits at the origin
+// looking down -z). ADS is derived from the weapon's own sight height so the
+// player really does look through the optic.
+const REST = new THREE.Vector3(0.17, -0.185, -0.44);
+const ADS_Z = -0.34;
+const SCALE = 0.82;
 
-function boxes(spec, mats) {
-  const g = new THREE.Group();
-  for (const b of spec) {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(b.w, b.h, b.d), mats[b.m]);
-    m.position.set(b.x, b.y, b.z);
-    if (b.rx) m.rotation.x = b.rx;
-    g.add(m);
-  }
-  return g;
-}
+const HAND_UV = 12;
 
-// Each weapon is a handful of boxes — readable in the corner of the screen
-// without costing anything.
-const SHAPES = {
-  ranger: [
-    { x: 0, y: 0, z: 0, w: 0.09, h: 0.1, d: 0.62, m: 'dark' },
-    { x: 0, y: 0.075, z: -0.05, w: 0.05, h: 0.05, d: 0.34, m: 'metal' },
-    { x: 0, y: -0.005, z: -0.44, w: 0.045, h: 0.045, d: 0.28, m: 'metal' },
-    { x: 0, y: -0.14, z: 0.02, w: 0.07, h: 0.19, d: 0.11, m: 'trim' },
-    { x: 0, y: -0.09, z: 0.24, w: 0.06, h: 0.13, d: 0.13, m: 'dark', rx: 0.3 },
-    { x: 0, y: 0.085, z: 0.12, w: 0.03, h: 0.04, d: 0.06, m: 'trim' },
-  ],
-  sentinel: [
-    { x: 0, y: 0, z: 0, w: 0.12, h: 0.13, d: 0.56, m: 'dark' },
-    { x: 0, y: -0.03, z: -0.4, w: 0.1, h: 0.1, d: 0.3, m: 'metal' },
-    { x: 0, y: -0.05, z: -0.16, w: 0.13, h: 0.06, d: 0.3, m: 'trim' },
-    { x: 0, y: -0.14, z: 0.16, w: 0.08, h: 0.16, d: 0.12, m: 'dark', rx: 0.25 },
-  ],
-  marksman: [
-    { x: 0, y: 0, z: 0, w: 0.08, h: 0.1, d: 0.78, m: 'dark' },
-    { x: 0, y: 0, z: -0.62, w: 0.05, h: 0.05, d: 0.46, m: 'metal' },
-    { x: 0, y: 0.105, z: -0.08, w: 0.07, h: 0.07, d: 0.3, m: 'metal' },
-    { x: 0, y: 0.105, z: -0.24, w: 0.09, h: 0.09, d: 0.06, m: 'trim' },
-    { x: 0, y: -0.13, z: 0.06, w: 0.06, h: 0.17, d: 0.1, m: 'dark' },
-    { x: 0, y: -0.05, z: 0.34, w: 0.07, h: 0.12, d: 0.2, m: 'dark' },
-  ],
-  medic: [
-    { x: 0, y: 0, z: 0, w: 0.085, h: 0.105, d: 0.42, m: 'dark' },
-    { x: 0, y: 0.02, z: -0.3, w: 0.04, h: 0.04, d: 0.22, m: 'metal' },
-    { x: 0, y: -0.13, z: -0.02, w: 0.065, h: 0.18, d: 0.1, m: 'trim' },
-    { x: 0, y: -0.07, z: 0.2, w: 0.055, h: 0.11, d: 0.1, m: 'dark', rx: 0.35 },
-    { x: 0.055, y: 0.06, z: -0.08, w: 0.03, h: 0.03, d: 0.16, m: 'trim' },
-  ],
+// Where the arms come from, in the weapon's own space. Both forearms are aimed
+// at these points and then run off the bottom of the frame, which is what sells
+// the hands as attached to a body rather than floating in front of the camera.
+// They have to sit well below the weapon: aim a forearm anywhere near the
+// weapon's own height and it lies across the receiver a few centimetres from
+// the near plane, filling a third of the screen with a blurred sleeve.
+const SHOULDER = {
+  right: new THREE.Vector3(0.05, -0.34, 0.86),
+  left: new THREE.Vector3(-0.44, -0.36, 0.80),
 };
+const ARM_AXIS = new THREE.Vector3(0, 0, -1);
 
 export class ViewModel {
   /**
@@ -63,71 +36,129 @@ export class ViewModel {
     this.camera = camera;
     this.root = new THREE.Group();
     this.root.position.copy(REST);
-    this.root.scale.setScalar(VIEWMODEL_SCALE);
-    // The weapon camera sits at the origin looking down -z, so positions in
-    // this scene are already view-space offsets from the player's eye.
+    this.root.scale.setScalar(SCALE);
     weaponScene.add(this.root);
 
-    // There is no environment map in this scene, so metalness has to stay low
-    // — fully metallic surfaces would render almost black.
-    this.mats = {
-      dark: new THREE.MeshStandardMaterial({ color: 0x76829a, roughness: 0.55, metalness: 0.12 }),
-      metal: new THREE.MeshStandardMaterial({ color: 0xa6b3c6, roughness: 0.32, metalness: 0.3 }),
-      trim: new THREE.MeshStandardMaterial({ color: 0x4ade80, roughness: 0.4, metalness: 0.1, emissive: 0x143f24 }),
-    };
+    this.rig = new THREE.Group(); // carries recoil + reload motion
+    this.root.add(this.rig);
 
-    this.gun = new THREE.Group();
-    this.root.add(this.gun);
-
-    // Gloved hands so the weapon does not float.
-    const handMat = new THREE.MeshStandardMaterial({ color: 0x424f66, roughness: 0.8 });
-    this.frontHand = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.12, 0.13), handMat);
-    this.backHand = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.13, 0.12), handMat);
-    this.gun.add(this.frontHand, this.backHand);
-
-    this.muzzle = new THREE.Object3D();
-    this.gun.add(this.muzzle);
+    this.hands = this.buildHands();
+    this.rig.add(this.hands.group);
 
     this.recoil = 0;
     this.recoilVel = 0;
+    this.recoilRot = 0;
     this.bobPhase = 0;
     this.swayX = 0;
     this.swayY = 0;
     this.ads = 0;
     this.reloadT = 0;
     this.reloadDur = 0;
+    this.boltT = 0;
     this.heroId = null;
     this.setHero('ranger');
+  }
+
+  /**
+   * Builds two gloved hands and two forearms. The hands are modelled in a
+   * canonical grip: whatever is being held runs up the +Y axis through the
+   * origin, the back of the hand sits behind it at +Z, the fingers curl round
+   * the front, and the wrist leaves at the top. Every weapon presents a raked
+   * pistol grip and an angled foregrip, so that one pose fits all eight
+   * contacts and only the rake changes.
+   *
+   * Forearms are separate objects rather than children of the hands: aiming
+   * them at a shoulder anchor is a one-line quaternion, where posing them
+   * through the hand would need a wrist joint the model does not have.
+   */
+  buildHands() {
+    const glove = pbr('rubber', '#2b2e33', { roughness: 0.92, envMapIntensity: 0.35 });
+    const cuff = pbr('fabric', '#23262b', { roughness: 0.95, envMapIntensity: 0.3 });
+    const sleeve = pbr('fabric', '#3c4136', { roughness: 0.94, envMapIntensity: 0.3 });
+    const group = new THREE.Group();
+
+    const makeHand = (side) => {
+      const g = new THREE.Group();
+      const b = new Bucket(HAND_UV);
+      // Back of the hand, behind the grip.
+      b.add(box(0.046, 0.098, 0.032), glove, { x: side * 0.006, y: 0.004, z: 0.038 });
+      // Four fingers stacked down the grip, each wrapping round to the front.
+      for (let i = 0; i < 4; i++) {
+        const y = 0.030 - i * 0.022;
+        const taper = 1 - i * 0.08;
+        b.add(box(0.030, 0.019 * taper, 0.052), glove, { x: -side * 0.014, y, z: 0.012 });
+        b.add(box(0.040 * taper, 0.018 * taper, 0.026), glove, { x: -side * 0.012, y: y - 0.003, z: -0.024 });
+      }
+      // Knuckles, raised where the fingers turn the corner.
+      b.add(box(0.020, 0.086, 0.030), glove, { x: -side * 0.026, y: 0.002, z: 0.008 });
+      // Thumb: up the near side and laid across the front of the grip.
+      b.add(box(0.021, 0.046, 0.026), glove, { x: side * 0.028, y: 0.006, z: 0.020, rz: -side * 0.45 });
+      b.add(box(0.046, 0.020, 0.024), glove, { x: side * 0.008, y: 0.036, z: 0.002, rz: -side * 0.2 });
+      // Wrist cuff where the glove meets the sleeve.
+      b.add(cyl(0.030, 0.034, 0.036, 10), cuff, { y: 0.060, z: 0.020, rx: -0.25 });
+      b.build(g, false);
+      return g;
+    };
+
+    const makeArm = () => {
+      const g = new THREE.Group();
+      // Built along -Z so a single setFromUnitVectors aims it at the shoulder.
+      new Bucket(HAND_UV)
+        .add(capsule(0.034, 0.30, 10), sleeve, { z: -0.19, rx: Math.PI / 2 })
+        .build(g, false);
+      return g;
+    };
+
+    const right = makeHand(1);
+    const left = makeHand(-1);
+    const rightArm = makeArm();
+    const leftArm = makeArm();
+    group.add(right, left, rightArm, leftArm);
+    return { group, right, left, rightArm, leftArm };
+  }
+
+  /**
+   * Puts a hand on a contact point and swings its forearm back to the shoulder.
+   * The wrist sits a little above the hand's origin, along whatever rake the
+   * grip has, which is why the offset is rotated by the hand's own euler.
+   */
+  placeHand(hand, arm, contact, shoulder) {
+    hand.position.set(contact.x || 0, contact.y || 0, contact.z || 0);
+    hand.rotation.set(contact.rx || 0, contact.ry || 0, contact.rz || 0);
+
+    const wrist = new THREE.Vector3(0, 0.068, 0.022).applyEuler(hand.rotation).add(hand.position);
+    arm.position.copy(wrist);
+    arm.quaternion.setFromUnitVectors(ARM_AXIS, shoulder.clone().sub(wrist).normalize());
+    arm.userData.rest = wrist.clone();
   }
 
   setHero(heroId) {
     if (this.heroId === heroId) return;
     this.heroId = heroId;
-    const hero = getHero(heroId);
-    this.mats.trim.color.set(hero.color);
-    this.mats.trim.emissive.set(new THREE.Color(hero.color).multiplyScalar(0.25));
 
-    // Rebuild the weapon, keeping the hands and muzzle marker.
-    for (const child of [...this.gun.children]) {
-      if (child === this.frontHand || child === this.backHand || child === this.muzzle) continue;
-      this.gun.remove(child);
-      child.geometry.dispose();
+    if (this.weapon) {
+      this.rig.remove(this.weapon.group);
+      this.weapon.group.traverse((o) => {
+        if (o.isMesh) o.geometry.dispose();
+      });
     }
-    const shape = SHAPES[heroId] || SHAPES.ranger;
-    const built = boxes(shape, this.mats);
-    for (const m of [...built.children]) this.gun.add(m);
-
-    // Place hands and muzzle relative to the barrel length.
-    const barrel = shape.reduce((acc, b) => Math.min(acc, b.z - b.d / 2), 0);
-    this.muzzle.position.set(0, 0, barrel);
-    this.frontHand.position.set(0, -0.08, barrel * 0.45);
-    this.backHand.position.set(0, -0.13, 0.1);
+    this.weapon = buildWeapon(heroId, true);
+    this.rig.add(this.weapon.group);
     this.scopeHero = heroId === 'marksman';
+
+    // Each weapon states where its two hand contacts are, so the hands land on
+    // the actual grips rather than on a table of numbers kept in step by hand.
+    const h = this.hands;
+    this.placeHand(h.right, h.rightArm, this.weapon.grip, SHOULDER.right);
+    this.placeHand(h.left, h.leftArm, this.weapon.support, SHOULDER.left);
+    this.supportRest = h.left.position.z;
   }
 
   kick(strength = 1) {
-    this.recoilVel += 0.06 * strength;
-    this.recoil += 0.012 * strength;
+    this.recoilVel += 0.055 * strength;
+    this.recoil += 0.01 * strength;
+    this.recoilRot += 0.05 * strength;
+    this.boltT = 1;
   }
 
   startReload(ms) {
@@ -135,77 +166,131 @@ export class ViewModel {
     this.reloadT = this.reloadDur;
   }
 
+  /** World position of the muzzle, for tracers and flashes. */
+  muzzleWorld(out = new THREE.Vector3()) {
+    this.root.updateMatrixWorld(true);
+    this.camera.updateMatrixWorld();
+    this.weapon.muzzle.getWorldPosition(out);
+    return this.camera.localToWorld(out);
+  }
+
+  /** World position of the ejection port, for flying brass. */
+  ejectWorld(out = new THREE.Vector3()) {
+    this.root.updateMatrixWorld(true);
+    this.camera.updateMatrixWorld();
+    out.set(0.05, 0.02, 0.02);
+    this.rig.localToWorld(out);
+    return this.camera.localToWorld(out);
+  }
+
   update(dt, s) {
-    // Sway: the weapon lags behind fast mouse movement.
+    const decay = (per60) => Math.pow(per60, Math.min(4, dt * 60));
+    const step = Math.min(4, dt * 60);
+
+    // Sway: the weapon trails fast mouse movement.
     const swayTarget = -Math.max(-1, Math.min(1, s.yawDelta * 9));
     const swayTargetY = -Math.max(-1, Math.min(1, s.pitchDelta * 9));
     this.swayX += (swayTarget - this.swayX) * Math.min(1, dt * 9);
     this.swayY += (swayTargetY - this.swayY) * Math.min(1, dt * 9);
 
-    // ADS blend.
-    const wantAds = s.zoom ? 1 : 0;
+    // Aiming blends towards putting the sight on the screen centre.
+    const wantAds = s.zoom && this.reloadT <= 0 ? 1 : 0;
     this.ads += (wantAds - this.ads) * Math.min(1, dt * 13);
 
-    // Walk bob.
     const speed = Math.min(9, s.speed || 0);
     if (s.onGround && speed > 0.6) this.bobPhase += dt * (5 + speed * 1.15);
-    const bobAmt = (speed / 9) * 0.016 * (1 - this.ads * 0.75);
+    const bobAmt = (speed / 9) * 0.015 * (1 - this.ads * 0.85);
     const bobX = Math.cos(this.bobPhase) * bobAmt;
     const bobY = Math.abs(Math.sin(this.bobPhase)) * bobAmt * 0.9;
 
-    // Recoil spring. Decay is normalised against a 60Hz step so a slow frame
-    // cannot let kicks stack up and shove the weapon out of view.
-    const decay = (per60) => Math.pow(per60, Math.min(4, dt * 60));
-    this.recoil += this.recoilVel * Math.min(4, dt * 60);
+    // Recoil springs.
+    this.recoil += this.recoilVel * step;
     this.recoilVel *= decay(0.72);
     this.recoil *= decay(0.82);
-    this.recoil = Math.min(this.recoil, 0.14);
+    this.recoil = Math.min(this.recoil, 0.13);
+    this.recoilRot *= decay(0.8);
 
-    const target = REST.clone().lerp(ADS, this.ads);
+    // Sight-aligned ADS: lift the weapon so its optic sits on the crosshair.
+    const sightDrop = -(this.weapon.sightHeight ?? 0.08);
+    const ax = 0;
+    const ay = sightDrop;
     this.root.position.set(
-      target.x + this.swayX * 0.05 + bobX,
-      target.y + this.swayY * 0.04 + bobY - this.recoil * 0.35,
-      target.z + this.recoil * 1.1,
+      THREE.MathUtils.lerp(REST.x, ax, this.ads) + this.swayX * 0.045 * (1 - this.ads * 0.7) + bobX,
+      THREE.MathUtils.lerp(REST.y, ay, this.ads) + this.swayY * 0.035 * (1 - this.ads * 0.7) + bobY - this.recoil * 0.3,
+      THREE.MathUtils.lerp(REST.z, ADS_Z, this.ads) + this.recoil * 1.0,
     );
     this.root.rotation.set(
-      this.swayY * 0.12 - this.recoil * 2.4,
-      this.swayX * 0.16,
-      this.swayX * 0.08 + (s.zoom ? 0 : 0.02),
+      this.swayY * 0.11 * (1 - this.ads * 0.8) - this.recoilRot,
+      this.swayX * 0.15 * (1 - this.ads * 0.8),
+      (this.swayX * 0.07 + 0.03) * (1 - this.ads),
     );
 
-    // Reload: drop the weapon out of frame and spin it back.
-    if (this.reloadT > 0) {
-      this.reloadT -= dt;
-      const k = 1 - Math.max(0, this.reloadT) / this.reloadDur;
-      const dip = Math.sin(Math.min(1, k) * Math.PI);
-      this.gun.position.y = -dip * 0.16;
-      this.gun.rotation.x = dip * 0.75;
-      this.gun.rotation.z = dip * 0.35;
-    } else if (this.gun.position.y !== 0) {
-      const k = decay(0.8);
-      this.gun.position.y *= k;
-      this.gun.rotation.x *= k;
-      this.gun.rotation.z *= k;
-      if (Math.abs(this.gun.position.y) < 0.001) {
-        this.gun.position.y = 0;
-        this.gun.rotation.set(0, 0, 0);
-      }
-    }
+    this.animateBolt(dt);
+    this.animateReload(dt);
 
-    // Hide the model while scoped with the sniper — the scope overlay takes over.
-    const scoped = this.scopeHero && this.ads > 0.75;
+    // The sniper's scope overlay replaces the model once fully aimed.
+    const scoped = this.scopeHero && this.ads > 0.8;
     this.root.visible = !!s.alive && !scoped;
   }
 
-  /**
-   * World position of the muzzle. The weapon lives in view space, so its
-   * position is transformed through the world camera to place tracers and
-   * flashes in the level.
-   */
-  muzzleWorld(out = new THREE.Vector3()) {
-    this.root.updateMatrixWorld();
-    this.camera.updateMatrixWorld();
-    this.muzzle.getWorldPosition(out);
-    return this.camera.localToWorld(out);
+  animateBolt(dt) {
+    if (this.boltT > 0) this.boltT = Math.max(0, this.boltT - dt * 14);
+    const bolt = this.weapon.bolt;
+    if (!bolt) return;
+    const rest = bolt.userData.rest;
+    const travel = bolt.userData.travel || 0;
+    // Snap back, ride forward.
+    const k = this.boltT > 0.5 ? (1 - this.boltT) * 2 : this.boltT * 2;
+    bolt.position.z = rest.z + k * travel;
+
+    // On a pump gun the support hand is what works the action, so it travels
+    // with the forend instead of hovering where the forend used to be.
+    if (this.weapon.supportRidesBolt) {
+      this.hands.left.position.z = this.supportRest + k * travel;
+      this.hands.leftArm.position.z = this.hands.leftArm.userData.rest.z + k * travel;
+    }
+  }
+
+  animateReload(dt) {
+    if (this.reloadT <= 0) {
+      if (this.rig.position.lengthSq() > 1e-6 || this.rig.rotation.x !== 0) {
+        const k = Math.pow(0.8, Math.min(4, dt * 60));
+        this.rig.position.multiplyScalar(k);
+        this.rig.rotation.x *= k;
+        this.rig.rotation.z *= k;
+      }
+      return;
+    }
+
+    this.reloadT -= dt;
+    const t = 1 - Math.max(0, this.reloadT) / this.reloadDur; // 0..1
+
+    // Tip the weapon into view, swap the magazine, bring it back on target.
+    const dip = Math.sin(Math.min(1, t) * Math.PI);
+    this.rig.position.set(-0.03 * dip, -0.10 * dip, 0.04 * dip);
+    this.rig.rotation.x = 0.5 * dip;
+    this.rig.rotation.z = -0.35 * dip;
+
+    const mag = this.weapon.mag;
+    if (mag) {
+      const rest = mag.userData.rest;
+      if (t < 0.4) {
+        // Old magazine falls away.
+        const k = t / 0.4;
+        mag.position.set(rest.x, rest.y - k * 0.3, rest.z);
+        mag.rotation.x = k * 0.9;
+        mag.visible = k < 0.95;
+      } else if (t < 0.72) {
+        mag.visible = false;
+      } else {
+        // Fresh magazine seated.
+        const k = Math.min(1, (t - 0.72) / 0.22);
+        mag.visible = true;
+        mag.position.set(rest.x, rest.y - (1 - k) * 0.22, rest.z);
+        mag.rotation.x = (1 - k) * 0.5;
+      }
+    }
+    // Cycle the action at the end of the reload.
+    if (t > 0.9 && this.boltT === 0) this.boltT = 1;
   }
 }

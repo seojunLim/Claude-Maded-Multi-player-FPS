@@ -4,6 +4,7 @@
 
 import * as THREE from 'three';
 import { MAP_KINDS } from '/shared/map.js';
+import { buildEnvironment } from './materials.js';
 import { TEAMS } from '/shared/constants.js';
 
 /* ───────────────────────────── procedural textures ───────────────────── */
@@ -16,6 +17,10 @@ function canvasTexture(size, draw) {
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.anisotropy = 4;
+  // Colour written to a canvas is sRGB. Left untagged, three.js reads it as
+  // linear and every surface comes out a stop or two too bright and washed —
+  // which is what made the level look bleached under an otherwise sane sun.
+  tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
 
@@ -229,7 +234,7 @@ export class Stage {
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 0.92;
 
     this.scene = new THREE.Scene();
     this.scene.fog = new THREE.Fog(0x18283d, 70, 280);
@@ -243,30 +248,58 @@ export class Stage {
     // player's field-of-view setting.
     this.weaponScene = new THREE.Scene();
     this.weaponCamera = new THREE.PerspectiveCamera(62, 2, 0.01, 12);
-    this.weaponScene.add(new THREE.HemisphereLight(0xd8e8ff, 0x38445c, 1.35));
-    const wKey = new THREE.DirectionalLight(0xfff3e2, 1.9);
+    // Kept close to the world's own sun/fill balance. Lighting the view model
+    // harder than the level is a quick way to make the weapon look pasted on.
+    this.weaponScene.add(new THREE.HemisphereLight(0xd8e8ff, 0x38445c, 0.35));
+    const wKey = new THREE.DirectionalLight(0xfff3e2, 1.15);
     wKey.position.set(0.6, 1, 0.4);
     this.weaponScene.add(wKey);
-    const wRim = new THREE.DirectionalLight(0x9dc2ff, 0.7);
+    const wRim = new THREE.DirectionalLight(0x9dc2ff, 0.5);
     wRim.position.set(-0.8, 0.2, -0.6);
     this.weaponScene.add(wRim);
 
     this.baseFov = opts.fov ?? 90;
+
+    // A prefiltered sky gives every metal surface something to reflect.
+    this.scene.environment = buildEnvironment(this.renderer, {
+      top: 0x2f6bb5,
+      mid: 0x7fb0e0,
+      bottom: 0xf6d3a6,
+      sunDir: new THREE.Vector3(58, 96, 44),
+    });
+    // The view model gets a neutral dome of its own rather than the sky. Gun
+    // metal is a mirror at these roughnesses, and it is always seen from above,
+    // so the sky's sandy lower half lands squarely on every face pointed at the
+    // player and turns the receiver tan.
+    this.weaponScene.environment = buildEnvironment(this.renderer, {
+      top: 0x9db0c4,
+      mid: 0x818b98,
+      bottom: 0x4b5058,
+      sunDir: new THREE.Vector3(0.6, 1, 0.4),
+    });
+    // Image-based light is ambient, so it has to stay well under the sun or
+    // everything washes out into flat white.
+    this.scene.environmentIntensity = 0.32;
+    this.weaponScene.environmentIntensity = 0.45;
+
     this.addLights();
     this.addSky();
     this.resize();
   }
 
   addLights() {
-    const hemi = new THREE.HemisphereLight(0xbcd7ff, 0x3f4a5e, 0.95);
+    // With an environment map doing the ambient work, the fill lights can come
+    // down a long way — otherwise everything washes out flat.
+    const hemi = new THREE.HemisphereLight(0xbcd7ff, 0x3f4a5e, 0.35);
     this.scene.add(hemi);
-    // Keeps building interiors readable instead of pitch black.
-    this.scene.add(new THREE.AmbientLight(0x8fa8c8, 0.34));
+    this.scene.add(new THREE.AmbientLight(0x8fa8c8, 0.12));
 
-    const sun = new THREE.DirectionalLight(0xfff2dc, 1.35);
+    const sun = new THREE.DirectionalLight(0xfff2dc, 1.45);
     sun.position.set(58, 96, 44);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(this.mobile ? 1024 : 2048, this.mobile ? 1024 : 2048);
+    const shadowRes = this.mobile ? 1024 : 2048;
+    sun.shadow.mapSize.set(shadowRes, shadowRes);
+    sun.shadow.radius = this.mobile ? 1 : 2.5;
     const s = 62;
     sun.shadow.camera.left = -s;
     sun.shadow.camera.right = s;
@@ -280,7 +313,7 @@ export class Stage {
     this.sun = sun;
 
     // Bounce light from the opposite side so shadowed faces are readable.
-    const fill = new THREE.DirectionalLight(0x7fa6ff, 0.32);
+    const fill = new THREE.DirectionalLight(0x7fa6ff, 0.25);
     fill.position.set(-50, 40, -60);
     this.scene.add(fill);
   }
