@@ -5,22 +5,32 @@
 import { KEY, PLAYER_EYE } from '../shared/constants.js';
 import { traceWorld, hasLineOfSight, eyeHeight } from '../shared/physics.js';
 
-// Points bots roam towards when they have nothing to shoot at.
-const POIS = [
-  { x: 0, z: 0 },
-  { x: 0, z: 14 },
-  { x: 0, z: -14 },
-  { x: -25, z: 17 },
-  { x: 25, z: 17 },
-  { x: -25, z: -17 },
-  { x: 25, z: -17 },
-  { x: -34, z: 0 },
-  { x: 34, z: 0 },
-  { x: -13, z: 11 },
-  { x: 13, z: -11 },
-  { x: 0, z: 26 },
-  { x: 0, z: -26 },
-];
+// Points bots roam towards when they have nothing to shoot at. Every arena is
+// a different size and shape, so they are derived from the map itself rather
+// than hard-coded, and cached per map.
+const POI_CACHE = new WeakMap();
+
+function poisFor(map) {
+  let pois = POI_CACHE.get(map);
+  if (pois) return pois;
+  pois = [];
+  const push = (x, z) => pois.push({ x, z });
+  const z = map.zone;
+  push(z ? z.x : 0, z ? z.z : 0);
+  for (const s of map.freeSpawns || [...map.spawns[0], ...map.spawns[1]]) push(s.x, s.z);
+  // A ring inside the outer walls so the flanks get walked too.
+  const r = map.half * 0.62;
+  for (let i = 0; i < 8; i++) {
+    push(Math.round(Math.cos((i / 8) * Math.PI * 2) * r), Math.round(Math.sin((i / 8) * Math.PI * 2) * r));
+  }
+  POI_CACHE.set(map, pois);
+  return pois;
+}
+
+function randomPoi(map) {
+  const pois = poisFor(map);
+  return pois[Math.floor(Math.random() * pois.length)];
+}
 
 export function createBotBrain(skill = 0.5) {
   return {
@@ -40,7 +50,7 @@ export function createBotBrain(skill = 0.5) {
     burstUntil: 0,
     holdUntil: 0,
     nextFireAt: 0,
-    poi: POIS[Math.floor(Math.random() * POIS.length)],
+    poi: { x: 0, z: 0 },
     poiUntil: 0,
     stuckTicks: 0,
     lastPos: { x: 0, z: 0 },
@@ -88,7 +98,7 @@ function pickTarget(bot, room) {
   let bestScore = -Infinity;
   const eye = { x: bot.x, y: bot.y + eyeHeight(bot.crouching), z: bot.z };
   for (const o of room.players.values()) {
-    if (o.id === bot.id || !o.alive || o.team === bot.team) continue;
+    if (!o.alive || !room.isEnemy(bot, o)) continue;
     const d = Math.hypot(o.x - bot.x, o.z - bot.z);
     if (d > 90) continue;
     const oEye = { x: o.x, y: o.y + PLAYER_EYE * 0.85, z: o.z };
@@ -109,7 +119,7 @@ export function updateBot(bot, room, dt) {
   const skill = brain.skill;
 
   let target = brain.targetId ? room.players.get(brain.targetId) : null;
-  if (target && (!target.alive || target.team === bot.team)) target = null;
+  if (target && (!target.alive || !room.isEnemy(bot, target))) target = null;
 
   const eye = { x: bot.x, y: bot.y + eyeHeight(bot.crouching), z: bot.z };
   let visible = false;
@@ -151,8 +161,9 @@ export function updateBot(bot, room, dt) {
     const distToPoi = Math.hypot(brain.poi.x - bot.x, brain.poi.z - bot.z);
     if (distToPoi < 5 || now >= brain.poiUntil) {
       const enemyMid = enemyCentroid(bot, room);
-      const candidates = POIS.filter((p) => Math.hypot(p.x - bot.x, p.z - bot.z) > 12);
-      let pick = candidates[Math.floor(Math.random() * candidates.length)] || POIS[0];
+      const pois = poisFor(room.map);
+      const candidates = pois.filter((p) => Math.hypot(p.x - bot.x, p.z - bot.z) > 12);
+      let pick = candidates[Math.floor(Math.random() * candidates.length)] || pois[0];
       if (enemyMid && Math.random() < 0.6) {
         // Bias towards the fight.
         let bestD = Infinity;
@@ -179,7 +190,7 @@ export function updateBot(bot, room, dt) {
         brain.nextJumpAt = now + 800;
       }
       if (brain.stuckTicks >= 3) {
-        brain.poi = POIS[Math.floor(Math.random() * POIS.length)];
+        brain.poi = randomPoi(room.map);
         brain.poiUntil = now + 8000;
         brain.stuckTicks = 0;
       }
@@ -364,7 +375,7 @@ function enemyCentroid(bot, room) {
   let x = 0;
   let z = 0;
   for (const o of room.players.values()) {
-    if (o.team === bot.team || !o.alive) continue;
+    if (!o.alive || !room.isEnemy(bot, o)) continue;
     x += o.x;
     z += o.z;
     n++;
@@ -374,7 +385,7 @@ function enemyCentroid(bot, room) {
 
 function alliesHurtNearby(bot, room) {
   for (const o of room.players.values()) {
-    if (o.team !== bot.team || !o.alive || o.id === bot.id) continue;
+    if (!o.alive || o.id === bot.id || room.isEnemy(bot, o)) continue;
     if (o.hp < o.hero.hp * 0.65 && Math.hypot(o.x - bot.x, o.z - bot.z) < bot.hero.ability.radius) return true;
   }
   return false;

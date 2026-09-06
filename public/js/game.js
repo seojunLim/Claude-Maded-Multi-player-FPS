@@ -14,7 +14,8 @@ import {
   MATCH_STATE,
   TEAMS,
 } from '/shared/constants.js';
-import { buildMap } from '/shared/map.js';
+import { buildMap, getMapMeta } from '/shared/map.js';
+import { getMode } from '/shared/modes.js';
 import {
   makeWorld,
   stepPlayer,
@@ -47,20 +48,32 @@ export class Game {
     this.selfTeam = welcome.team;
     this.heroId = welcome.hero;
     this.roomName = welcome.room;
+    // The server is the authority on what is actually being played: the menu
+    // only ever asks, and an existing room keeps the rules it was opened with.
+    this.mode = getMode(welcome.mode);
+    this.mapId = welcome.map;
+    this.ffa = !this.mode.teams;
 
-    this.map = buildMap();
+    this.map = buildMap(this.mapId);
     this.world = makeWorld(this.map);
 
     this.stage = new Stage(canvas, {
       fov: settings.fov,
       shadows: settings.shadows,
       mobile: !!settings.mobile,
+      theme: this.map.theme || getMapMeta(this.mapId).theme,
     });
     this.stage.buildLevel(this.map);
     this.effects = new Effects(this.stage.scene);
     this.viewmodel = new ViewModel(this.stage.weaponScene, this.stage.camera);
     this.viewmodel.setHero(this.heroId);
-    this.minimap = new Minimap(document.getElementById('minimap'), this.map);
+    this.minimap = new Minimap(document.getElementById('minimap'), this.map, {
+      teams: this.mode.teams,
+      zone: this.mode.scoring === 'zone' ? this.map.zone : null,
+    });
+    this.zoneMarker = this.mode.scoring === 'zone' && this.map.zone
+      ? this.stage.addZoneMarker(this.map.zone)
+      : null;
 
     // Predicted local state.
     this.self = { x: 0, y: 2, z: 0, vx: 0, vy: 0, vz: 0, onGround: false, crouching: false };
@@ -89,6 +102,7 @@ export class Game {
     this.matchState = MATCH_STATE.WARMUP;
     this.matchEndsAt = Date.now();
     this.scores = [0, 0];
+    this.zoneState = null;
     this.scoreboardOpen = false;
     this.alive = false;
     this.fpsFrames = 0;
@@ -102,6 +116,11 @@ export class Game {
     this.bindNet();
     this.bindKeys();
     window.addEventListener('resize', () => this.stage.resize());
+  }
+
+  /** In a free-for-all everyone shares one nominal team but nobody is a friend. */
+  isFoe(team) {
+    return this.ffa ? true : team !== this.selfTeam;
   }
 
   /* ------------------------------------------------------------ plumbing */
@@ -197,6 +216,7 @@ export class Game {
     this.running = true;
     this.hud.show();
     this.hud.setSelf(this.selfId, this.selfTeam);
+    this.hud.setMode(this.mode, getMapMeta(this.mapId));
     this.hud.setRoomName(this.roomName);
     this.hud.setHero(this.heroId);
     this.hud.setLockHint(!this.input.locked && !this.input.touchMode);
@@ -217,9 +237,10 @@ export class Game {
     this.hud.match(m);
     if (m.state === MATCH_STATE.OVER && !prev) {
       this.matchOverShown = true;
-      const mine = m.scores[this.selfTeam];
-      const theirs = m.scores[1 - this.selfTeam];
-      this.sfx.ui(mine >= theirs ? 'win' : 'lose');
+      const won = this.ffa
+        ? m.winner === this.selfId
+        : m.scores[this.selfTeam] >= m.scores[1 - this.selfTeam];
+      this.sfx.ui(won ? 'win' : 'lose');
     } else if (m.state !== MATCH_STATE.OVER) {
       this.matchOverShown = false;
     }
@@ -240,6 +261,18 @@ export class Game {
 
   onSnapshot(m) {
     this.revealed = !!m.rev;
+    // Domination streams the control point at snapshot rate so the HUD bar
+    // reacts the instant somebody steps on or off the point.
+    if (m.zn) {
+      this.zoneState = { owner: m.zn[0], contested: !!m.zn[1], counts: [m.zn[2], m.zn[3]] };
+      this.scores = [m.zn[4], m.zn[5]];
+      this.hud.setZone(this.zoneState, this.scores);
+      this.minimap.setZoneState(this.zoneState);
+      this.zoneMarker?.setOwner(
+        this.zoneState.owner >= 0 ? TEAMS[this.zoneState.owner].color : null,
+        this.zoneState.contested,
+      );
+    }
 
     // ---- reconcile the local player -------------------------------------
     const me = m.me;
@@ -349,6 +382,9 @@ export class Game {
           break;
         case EV.RELOAD:
           break;
+        case EV.PROMOTE:
+          this.onPromote(ev);
+          break;
         case 'confirm':
           this.hud.hitmarker(!!ev.kill);
           this.sfx.hitmarker(!!ev.kill);
@@ -382,7 +418,7 @@ export class Game {
     this.sfx.shot(ev.hero, origin, this.listener(), false);
 
     const team = this.hud.teamOf(ev.id);
-    if (team !== undefined && team !== this.selfTeam) {
+    if (team !== undefined && this.isFoe(team)) {
       this.pings.set(ev.id, { x: ev.x, z: ev.z, until: performance.now() + 2200 });
     }
   }
@@ -440,7 +476,19 @@ export class Game {
     this.effects.abilityBurst({ x: ev.x, y: ev.y, z: ev.z }, hero.color);
     this.sfx.ability(ev.hero, { x: ev.x, y: ev.y, z: ev.z }, this.listener(), ev.id === this.selfId);
     if (ev.id === this.selfId) this.hud.banner(hero.ability.name);
-    else if (ev.team === this.selfTeam) this.hud.chat({ system: true, msg: `${this.hud.nameOf(ev.id)} — ${hero.ability.name}` });
+    else if (!this.isFoe(ev.team)) this.hud.chat({ system: true, msg: `${this.hud.nameOf(ev.id)} — ${hero.ability.name}` });
+  }
+
+  /** Gun game: somebody just climbed a rung of the ladder. */
+  onPromote(ev) {
+    const hero = getHero(ev.hero);
+    const rungs = (this.mode.ladder || []).length;
+    if (ev.id === this.selfId) {
+      this.hud.banner(`승급 — ${hero.name} (${ev.stage + 1}/${rungs})`, true);
+      this.sfx.ui('win');
+    } else {
+      this.hud.chat({ system: true, msg: `${ev.name} 님이 ${hero.name}(으)로 승급 (${ev.stage + 1}/${rungs})` });
+    }
   }
 
   /* ------------------------------------------------------------ main loop */
@@ -566,7 +614,7 @@ export class Game {
     let bestDot = CONE;
 
     for (const s of this.remote.values()) {
-      if (s.team === this.selfTeam || !s.alive) continue;
+      if (!this.isFoe(s.team) || !s.alive) continue;
       const tx = s.x - eye.x;
       const ty = s.y + (s.crouching ? 0.85 : 1.15) - eye.y;
       const tz = s.z - eye.z;
@@ -725,7 +773,7 @@ export class Game {
       : null;
     let limit = best ? best.dist : range;
     for (const [id, s] of this.remote) {
-      if (s.team === this.selfTeam || !s.alive) continue;
+      if (!this.isFoe(s.team) || !s.alive) continue;
       const hit = traceEntity(origin, dir, { x: s.x, y: s.y, z: s.z, crouching: s.crouching }, limit);
       if (hit && hit.dist < limit) {
         limit = hit.dist;
@@ -791,7 +839,7 @@ export class Game {
       }
       av.group.visible = state.alive;
       av.setHealth(state.hp, state.mhp);
-      const friendly = state.team === this.selfTeam;
+      const friendly = !this.isFoe(state.team);
       av.update(state, {
         camera: this.stage.camera,
         dt,
@@ -891,7 +939,7 @@ export class Game {
     const blips = [{ x: this.self.x, z: this.self.z, team: this.selfTeam, alive: this.alive, self: true }];
     const now = performance.now();
     for (const [id, s] of this.remote) {
-      const friendly = s.team === this.selfTeam;
+      const friendly = !this.isFoe(s.team);
       const ping = this.pings.get(id);
       const pingK = ping && ping.until > now ? (ping.until - now) / 2200 : 0;
       if (friendly || this.revealed || pingK > 0) {

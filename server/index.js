@@ -19,6 +19,8 @@ import {
   ROOM_SIZE_MAX,
 } from '../shared/constants.js';
 import { HEROES } from '../shared/heroes.js';
+import { MAP_LIST } from '../shared/map.js';
+import { MODE_LIST } from '../shared/modes.js';
 import { Room } from './room.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -40,13 +42,13 @@ const rooms = new Map();
  * for the life of the room — later arrivals join the match as it was set up
  * rather than resizing it under the people already waiting.
  */
-function getRoom(name, size) {
+function getRoom({ name, size, mode, map }) {
   const key = String(name || 'sanctum').toLowerCase().replace(/[^a-z0-9-_]/g, '').slice(0, 20) || 'sanctum';
   let room = rooms.get(key);
   if (!room) {
-    room = new Room(key, { bots: Number.isFinite(BOTS) ? BOTS : 0, size });
+    room = new Room(key, { bots: Number.isFinite(BOTS) ? BOTS : 0, size, mode, map });
     rooms.set(key, room);
-    console.log(`[room] created "${key}" for ${room.size} players`);
+    console.log(`[room] created "${key}" — ${room.mode.name} on ${room.map.name} for ${room.size} players`);
   }
   return room;
 }
@@ -60,8 +62,14 @@ app.get('/api/status', (req, res) => {
       state: r.state,
       size: r.size,
       scores: r.scores,
+      mode: r.mode.id,
+      modeName: r.mode.name,
+      map: r.mapId,
+      mapName: r.map.name,
     })),
     heroes: Object.values(HEROES).map((h) => ({ id: h.id, name: h.name, role: h.role })),
+    modes: MODE_LIST.map((m) => ({ id: m.id, name: m.name, short: m.short })),
+    maps: MAP_LIST.map((m) => ({ id: m.id, name: m.name, size: m.size })),
     roomSize: { min: ROOM_SIZE_MIN, max: ROOM_SIZE_MAX },
     uptime: Math.round(process.uptime()),
   });
@@ -104,7 +112,7 @@ wss.on('connection', (socket) => {
 
     if (msg.t === MSG.JOIN) {
       if (player) return;
-      room = getRoom(msg.room, msg.size);
+      room = getRoom({ name: msg.room, size: msg.size, mode: msg.mode, map: msg.map });
       if (room.humanCount >= room.size) {
         fail(`이 매치는 정원(${room.size}명)이 찼습니다. 다른 매치 코드를 사용해 주세요.`);
         return;
@@ -120,12 +128,14 @@ wss.on('connection', (socket) => {
           hero: player.heroId,
           room: room.name,
           size: room.size,
+          mode: room.mode.id,
+          map: room.mapId,
           now: Date.now(),
           cfg: { TICK_RATE, SNAPSHOT_RATE, COMMAND_SEND_RATE, INTERP_DELAY_MS },
         }),
       );
       room.broadcast(room.matchInfo());
-      console.log(`[join] ${name} (#${player.id}) -> ${room.name} team ${player.team}`);
+      console.log(`[join] ${name} (#${player.id}) -> ${room.name} (${room.mode.short}/${room.map.name}) team ${player.team}`);
       return;
     }
 

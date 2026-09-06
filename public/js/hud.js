@@ -1,7 +1,8 @@
 // All DOM/HUD updates live here so the render loop only pushes numbers in.
 
-import { TEAMS, MATCH_STATE, SCORE_LIMIT } from '/shared/constants.js';
+import { TEAMS, MATCH_STATE } from '/shared/constants.js';
 import { HEROES, getHero } from '/shared/heroes.js';
+import { getMode } from '/shared/modes.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -18,6 +19,18 @@ export class Hud {
       scope: $('scope'),
       score0: $('score0'),
       score1: $('score1'),
+      topbar: $('topbar'),
+      tname0: document.querySelector('#topbar .s0 .tname'),
+      tname1: document.querySelector('#topbar .s1 .tname'),
+      modetag: $('modetag'),
+      zonebar: $('zonebar'),
+      zonefill: $('zonefill'),
+      zonelabel: $('zonelabel'),
+      sbTitle: document.querySelector('#scoreboard .sb-head h2'),
+      sbTeams: document.querySelector('#scoreboard .sb-teams'),
+      sbHead0: document.querySelector('.sb-team[data-team="0"] h3'),
+      sbHead1: document.querySelector('.sb-team[data-team="1"] h3'),
+      deadhint: document.querySelector('#deadscreen .dead-hint'),
       timer: $('timer'),
       matchstate: $('matchstate'),
       killfeed: $('killfeed'),
@@ -67,6 +80,8 @@ export class Hud {
     };
     this.selfId = 0;
     this.selfTeam = 0;
+    this.mode = getMode('tdm');
+    this.mapMeta = null;
     this.roster = new Map();
     this.hitTimer = 0;
     this.lastHp = 0;
@@ -82,6 +97,71 @@ export class Hud {
   setSelf(id, team) {
     this.selfId = id;
     this.selfTeam = team;
+  }
+
+  /**
+   * Locks the HUD to the rules actually being played. Team modes keep the
+   * two-sided scoreboard; free-for-all collapses it into one ranked list and
+   * the top bar starts tracking "you versus whoever is winning".
+   */
+  setMode(mode, mapMeta) {
+    this.mode = mode;
+    this.mapMeta = mapMeta || null;
+    const ffa = !mode.teams;
+    document.body.classList.toggle('ffa', ffa);
+    document.body.classList.toggle('mode-zone', mode.scoring === 'zone');
+    document.body.classList.toggle('mode-ladder', mode.scoring === 'ladder');
+
+    if (this.el.modetag) {
+      this.el.modetag.textContent = mapMeta ? `${mode.name} · ${mapMeta.name}` : mode.name;
+    }
+    if (ffa) {
+      this.el.tname0.textContent = '나';
+      this.el.tname1.textContent = '선두';
+    } else {
+      this.el.tname0.textContent = TEAMS[0].name;
+      this.el.tname1.textContent = TEAMS[1].name;
+    }
+    if (this.el.sbTitle) {
+      this.el.sbTitle.textContent = `${mapMeta ? mapMeta.name : ''} — ${mode.name}`.trim();
+    }
+    if (this.el.sbHead1) this.el.sbHead1.parentElement.classList.toggle('hidden', ffa);
+    if (this.el.sbHead0) this.el.sbHead0.textContent = ffa ? '순위' : TEAMS[0].name;
+    // The gun-game ladder owns your hero, so the death screen must not offer
+    // a swap that the server will refuse.
+    const ladder = mode.scoring === 'ladder';
+    this.el.deadheroes.classList.toggle('hidden', ladder);
+    if (this.el.deadhint) {
+      this.el.deadhint.textContent = ladder
+        ? '부활 대기 중 — 영웅은 승급에 따라 자동으로 바뀝니다'
+        : '부활 대기 중 — 영웅을 교체할 수 있습니다';
+    }
+    // Gun game ranks by ladder rung, so the frag column is relabelled.
+    for (const th of document.querySelectorAll('.sb-team thead th:nth-child(3)')) {
+      th.textContent = ladder ? '단계' : 'K';
+    }
+    this.el.zonebar?.classList.toggle('hidden', mode.scoring !== 'zone');
+  }
+
+  /** Domination's live control-point readout, fed from every snapshot. */
+  setZone(state, scores) {
+    if (!this.el.zonebar || this.mode.scoring !== 'zone') return;
+    const owner = state.owner;
+    const label = this.mapMeta?.zone?.name || '거점';
+    const color = owner >= 0 ? TEAMS[owner].cssColor : '#cbd5e1';
+    this.el.zonebar.classList.toggle('contested', state.contested);
+    this.el.zonelabel.textContent = state.contested
+      ? `${label} 경합 중 (${state.counts[0]} : ${state.counts[1]})`
+      : owner >= 0
+        ? `${label} — ${TEAMS[owner].name} 점거 (${state.counts[owner]}명)`
+        : `${label} — 비어 있음`;
+    this.el.zonelabel.style.color = color;
+    // The bar reads as a tug of war between the two teams' banked points, and
+    // sits dead centre until somebody has actually banked something.
+    const total = scores[0] + scores[1];
+    this.el.zonefill.style.width = total > 0 ? `${(scores[0] / total) * 100}%` : '50%';
+    this.el.score0.textContent = scores[0];
+    this.el.score1.textContent = scores[1];
   }
 
   /* ------------------------------------------------------------ vitals */
@@ -281,24 +361,62 @@ export class Hud {
   }
 
   match(info) {
-    this.el.score0.textContent = info.scores[0];
-    this.el.score1.textContent = info.scores[1];
-    this.el.sbScore.innerHTML = `<span style="color:${TEAMS[0].cssColor}">${info.scores[0]}</span> : <span style="color:${TEAMS[1].cssColor}">${info.scores[1]}</span>`;
+    this.roster = new Map(info.roster.map((r) => [r.id, r]));
+    this.limit = info.limit;
+    this.updateScores(info);
     const label = {
       [MATCH_STATE.WAITING]: '플레이어 대기 중',
       [MATCH_STATE.WARMUP]: '곧 시작',
-      [MATCH_STATE.LIVE]: `선착 ${SCORE_LIMIT}킬`,
+      [MATCH_STATE.LIVE]: this.liveLabel(info),
       [MATCH_STATE.OVER]: '경기 종료',
     };
     this.matchState = info.state;
     this.el.matchstate.textContent = label[info.state] || '';
-    this.roster = new Map(info.roster.map((r) => [r.id, r]));
     this.renderScoreboard(info);
 
     if (info.state === MATCH_STATE.OVER) this.showMatchOver(info);
     else this.el.matchover.classList.add('hidden');
 
     this.setWaiting(info);
+  }
+
+  /** What the clock strap says a live match is being played to. */
+  liveLabel(info) {
+    switch (this.mode.scoring) {
+      case 'zone':
+        return `거점 ${info.limit}점`;
+      case 'ladder':
+        return `영웅 ${info.limit}단계`;
+      default:
+        return this.mode.teams ? `선착 ${info.limit}킬` : `개인 ${info.limit}킬`;
+    }
+  }
+
+  /** How far along a player is, in whatever the mode counts. */
+  progressOf(r) {
+    return this.mode.scoring === 'ladder' ? r.lvl ?? 0 : r.k;
+  }
+
+  /**
+   * Team modes put both team totals on the bar. Free-for-all has no team
+   * totals, so the bar becomes your score against whoever is leading.
+   */
+  updateScores(info) {
+    if (this.mode.teams) {
+      this.el.score0.textContent = info.scores[0];
+      this.el.score1.textContent = info.scores[1];
+      this.el.sbScore.innerHTML =
+        `<span style="color:${TEAMS[0].cssColor}">${info.scores[0]}</span> : <span style="color:${TEAMS[1].cssColor}">${info.scores[1]}</span>`;
+      return;
+    }
+    const ranked = [...info.roster].sort((a, b) => this.progressOf(b) - this.progressOf(a) || b.dmg - a.dmg);
+    const me = info.roster.find((r) => r.id === this.selfId);
+    const top = ranked.find((r) => r.id !== this.selfId);
+    const mine = me ? this.progressOf(me) : 0;
+    this.el.score0.textContent = mine;
+    this.el.score1.textContent = top ? this.progressOf(top) : 0;
+    const place = me ? ranked.findIndex((r) => r.id === me.id) + 1 : 0;
+    this.el.sbScore.textContent = place ? `${place}위 / ${ranked.length}명` : `${ranked.length}명`;
   }
 
   /** The lobby panel shown while a room does not have enough real players. */
@@ -363,34 +481,57 @@ export class Hud {
   }
 
   renderScoreboard(info) {
+    // Free-for-all is one ranked table; team modes keep one table per side.
+    if (!this.mode.teams) {
+      const rows = [...info.roster].sort((a, b) => this.progressOf(b) - this.progressOf(a) || b.dmg - a.dmg);
+      this.el.sb0.innerHTML = rows.map((r, i) => this.scoreRow(r, i + 1)).join('');
+      this.el.sb1.innerHTML = '';
+      return;
+    }
     for (const team of [0, 1]) {
-      const rows = info.roster
-        .filter((r) => r.team === team)
-        .sort((a, b) => b.k - a.k || b.dmg - a.dmg);
+      const rows = info.roster.filter((r) => r.team === team).sort((a, b) => b.k - a.k || b.dmg - a.dmg);
       const body = team === 0 ? this.el.sb0 : this.el.sb1;
-      body.innerHTML = rows
-        .map((r) => {
-          const hero = getHero(r.hero);
-          return `<tr class="${r.id === this.selfId ? 'me' : ''}">
-            <td>${escapeHtml(r.name)}${r.bot ? '<span class="bot">BOT</span>' : ''}</td>
-            <td class="hero">${hero.name}</td><td>${r.k}</td><td>${r.d}</td><td>${r.dmg}</td><td>${r.bot ? '—' : r.ping}</td>
-          </tr>`;
-        })
-        .join('');
+      body.innerHTML = rows.map((r) => this.scoreRow(r)).join('');
     }
   }
 
+  scoreRow(r, place) {
+    const hero = getHero(r.hero);
+    // Gun game ranks by ladder rung, so that is the number worth showing.
+    const first = this.mode.scoring === 'ladder' ? `${(r.lvl ?? 0) + 1}단계` : r.k;
+    return `<tr class="${r.id === this.selfId ? 'me' : ''}">
+      <td>${place ? `<span class="place">${place}</span>` : ''}${escapeHtml(r.name)}${r.bot ? '<span class="bot">BOT</span>' : ''}</td>
+      <td class="hero">${hero.name}</td><td>${first}</td><td>${r.d}</td><td>${r.dmg}</td><td>${r.bot ? '—' : r.ping}</td>
+    </tr>`;
+  }
+
   showMatchOver(info) {
-    const mine = info.scores[this.selfTeam];
-    const theirs = info.scores[1 - this.selfTeam];
     this.el.matchover.classList.remove('hidden');
-    const win = mine > theirs;
-    this.el.moResult.textContent = mine === theirs ? '무승부' : win ? '승리' : '패배';
-    this.el.moResult.className = mine === theirs ? '' : win ? 'win' : 'lose';
-    this.el.moScore.textContent = `${info.scores[0]} : ${info.scores[1]}`;
-    const mvp = [...info.roster].sort((a, b) => b.k - a.k || b.dmg - a.dmg)[0];
+    const ranked = [...info.roster].sort((a, b) => this.progressOf(b) - this.progressOf(a) || b.dmg - a.dmg);
+
+    let win;
+    if (this.mode.teams) {
+      const mine = info.scores[this.selfTeam];
+      const theirs = info.scores[1 - this.selfTeam];
+      win = mine > theirs;
+      this.el.moResult.textContent = mine === theirs ? '무승부' : win ? '승리' : '패배';
+      this.el.moResult.className = mine === theirs ? '' : win ? 'win' : 'lose';
+      this.el.moScore.textContent = `${info.scores[0]} : ${info.scores[1]}`;
+    } else {
+      const winner = info.roster.find((r) => r.id === info.winner) || ranked[0];
+      win = !!winner && winner.id === this.selfId;
+      const place = ranked.findIndex((r) => r.id === this.selfId) + 1;
+      this.el.moResult.textContent = win ? '승리' : place ? `${place}위` : '경기 종료';
+      this.el.moResult.className = win ? 'win' : place === 1 ? '' : 'lose';
+      this.el.moScore.textContent = winner
+        ? `${escapeHtml(winner.name)} · ${this.progressOf(winner)}${this.mode.scoring === 'ladder' ? '단계' : '킬'}`
+        : '—';
+    }
+
+    const mvp = ranked[0];
     if (mvp) {
-      this.el.moMvp.innerHTML = `MVP — <b style="color:${TEAMS[mvp.team].cssColor}">${escapeHtml(mvp.name)}</b> · ${mvp.k} KILLS · ${mvp.dmg} DMG`;
+      const color = this.mode.teams ? TEAMS[mvp.team].cssColor : '#f8fafc';
+      this.el.moMvp.innerHTML = `MVP — <b style="color:${color}">${escapeHtml(mvp.name)}</b> · ${mvp.k} KILLS · ${mvp.dmg} DMG`;
     }
     return win;
   }

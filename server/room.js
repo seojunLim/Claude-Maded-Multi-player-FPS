@@ -7,8 +7,6 @@ import {
   SNAPSHOT_RATE,
   MAX_REWIND_MS,
   HISTORY_MS,
-  MATCH_DURATION_MS,
-  SCORE_LIMIT,
   RESPAWN_MS,
   WARMUP_MS,
   POST_MATCH_MS,
@@ -26,7 +24,8 @@ import {
   FALL_DAMAGE_PER_SPEED,
   PLAYER_HEIGHT,
 } from '../shared/constants.js';
-import { buildMap } from '../shared/map.js';
+import { buildMap, isMapId, DEFAULT_MAP, randomMapId } from '../shared/map.js';
+import { getMode, DEFAULT_MODE, isModeId } from '../shared/modes.js';
 import { getHero, rangeFalloff, HEROES } from '../shared/heroes.js';
 import {
   makeWorld,
@@ -48,8 +47,17 @@ let nextPlayerId = 1;
 export class Room {
   constructor(name, opts = {}) {
     this.name = name;
-    this.map = buildMap();
+    this.mode = getMode(isModeId(opts.mode) ? opts.mode : DEFAULT_MODE);
+    this.mapId = pickMapId(opts.map);
+    this.map = buildMap(this.mapId);
     this.world = makeWorld(this.map);
+    // Free-for-all modes have no friendly fire rules to speak of: everyone is
+    // everyone else's enemy, and the score is personal.
+    this.ffa = !this.mode.teams;
+    this.zone = this.map.zone || null;
+    this.zoneState = { owner: -1, contested: false, counts: [0, 0] };
+    this.zoneCarry = 0;
+    this.winnerId = 0;
     this.players = new Map();
     this.tick = 0;
     this.events = [];
@@ -82,6 +90,9 @@ export class Room {
   // ---------------------------------------------------------------- players
 
   pickTeam() {
+    // Free-for-all still uses a single team slot so that every other player
+    // renders and reads as hostile; the scoreboard splits them out by id.
+    if (this.ffa) return 1;
     const counts = [0, 0];
     for (const p of this.players.values()) counts[p.team]++;
     if (counts[0] === counts[1]) return Math.random() < 0.5 ? 0 : 1;
@@ -126,6 +137,9 @@ export class Room {
       deaths: 0,
       damage: 0,
       streak: 0,
+      // Gun-game ladder position; unused by the other modes.
+      stage: 0,
+      stageKills: 0,
       cmds: [],
       lastCmd: { seq: 0, keys: 0, yaw: 0, pitch: 0 },
       ackSeq: 0,
@@ -134,6 +148,7 @@ export class Room {
       lastDamageFrom: null,
       brain: bot ? createBotBrain(skill) : null,
     };
+    if (this.mode.scoring === 'ladder') this.setLadderHero(p, 0);
     this.players.set(id, p);
     this.rosterDirty = true;
     return p;
@@ -176,14 +191,21 @@ export class Room {
 
   // ------------------------------------------------------------- spawning
 
-  spawnPoint(team) {
-    const list = this.map.spawns[team];
+  /**
+   * Picks the spawn point furthest from anyone who could shoot the arrival.
+   * Team modes only consider their own half; free-for-all draws from points
+   * spread across the whole arena, because there is no safe half.
+   */
+  spawnPoint(player) {
+    const list = this.ffa
+      ? this.map.freeSpawns || [...this.map.spawns[0], ...this.map.spawns[1]]
+      : this.map.spawns[player.team];
     let best = null;
     let bestScore = -Infinity;
     for (const s of list) {
       let nearestEnemy = Infinity;
       for (const p of this.players.values()) {
-        if (!p.alive || p.team === team) continue;
+        if (!p.alive || !this.isEnemy(player, p)) continue;
         const d = Math.hypot(p.x - s.x, p.z - s.z);
         if (d < nearestEnemy) nearestEnemy = d;
       }
@@ -196,14 +218,38 @@ export class Room {
     return best || list[0];
   }
 
+  /** Who is allowed to shoot whom. */
+  isEnemy(a, b) {
+    if (!a || !b || a.id === b.id) return false;
+    return this.ffa ? true : a.team !== b.team;
+  }
+
+  /** Moves a gun-game player onto rung `stage` of the ladder. */
+  setLadderHero(p, stage) {
+    const ladder = this.mode.ladder || Object.keys(HEROES);
+    const heroId = ladder[Math.min(stage, ladder.length - 1)];
+    p.stage = stage;
+    p.stageKills = 0;
+    p.heroId = heroId;
+    p.hero = getHero(heroId);
+    p.pendingHero = null;
+    p.hp = Math.min(p.hp || p.hero.hp, p.hero.hp) || p.hero.hp;
+    p.ammo = p.hero.weapon.mag;
+    p.reloadEndsAt = 0;
+    p.spread = p.hero.weapon.spread;
+    this.rosterDirty = true;
+  }
+
   respawn(p) {
+    // The ladder owns the hero in gun game, so a queued swap is ignored there.
+    if (this.mode.scoring === 'ladder') p.pendingHero = null;
     if (p.pendingHero && HEROES[p.pendingHero]) {
       p.heroId = p.pendingHero;
       p.hero = getHero(p.pendingHero);
       p.pendingHero = null;
       this.rosterDirty = true;
     }
-    const s = this.spawnPoint(p.team);
+    const s = this.spawnPoint(p);
     p.x = s.x + (Math.random() - 0.5) * 1.5;
     p.z = s.z + (Math.random() - 0.5) * 1.5;
     p.y = 0.2;
@@ -269,6 +315,8 @@ export class Room {
         dmg: Math.round(p.damage),
         bot: p.bot ? 1 : 0,
         ping: p.ping,
+        lvl: p.stage,
+        lk: p.stageKills,
       });
     }
     return list;
@@ -280,13 +328,36 @@ export class Room {
       state: this.state,
       scores: this.scores,
       endsIn: Math.max(0, this.stateEndsAt - Date.now()),
-      limit: SCORE_LIMIT,
+      limit: this.scoreLimit,
+      mode: this.mode.id,
+      mapId: this.mapId,
       map: this.map.name,
+      zone: this.zone ? { ...this.zone, ...this.zoneState } : null,
+      winner: this.winnerId,
       humans: this.humanCount,
       need: this.size,
       canStart: this.canStartEarly ? 1 : 0,
       roster: this.roster(),
     };
+  }
+
+  /** Points needed to win, in whatever unit the mode counts in. */
+  get scoreLimit() {
+    if (this.mode.scoring === 'ladder') return (this.mode.ladder || []).length;
+    return this.mode.scoreLimit;
+  }
+
+  /** The player currently ahead, for free-for-all modes. */
+  leader() {
+    let best = null;
+    for (const p of this.players.values()) {
+      if (!best || this.rank(p) > this.rank(best)) best = p;
+    }
+    return best;
+  }
+
+  rank(p) {
+    return this.mode.scoring === 'ladder' ? p.stage * 1000 + p.stageKills : p.kills * 1000 - p.deaths;
   }
 
   // ------------------------------------------------------------ client input
@@ -331,7 +402,7 @@ export class Room {
     if (p.hero.id === 'medic') {
       const healed = [];
       for (const o of this.players.values()) {
-        if (!o.alive || o.team !== p.team) continue;
+        if (!o.alive || this.isEnemy(p, o)) continue;
         if (Math.hypot(o.x - p.x, o.y - p.y, o.z - p.z) > a.radius) continue;
         const before = o.hp;
         o.hp = Math.min(o.hero.hp, o.hp + a.heal);
@@ -417,7 +488,7 @@ export class Room {
     // Snapshot enemy positions once, rewound to what the shooter could see.
     const targets = [];
     for (const o of this.players.values()) {
-      if (o.id === p.id || !o.alive || o.team === p.team) continue;
+      if (!o.alive || !this.isEnemy(p, o)) continue;
       if (now < o.invulnUntil) continue;
       const pos = this.rewound(o, rewind);
       targets.push({ player: o, x: pos.x, y: pos.y, z: pos.z, crouching: pos.crouching });
@@ -554,10 +625,16 @@ export class Room {
     victim.abilityUntil = 0;
 
     const selfKill = !attacker || attacker.id === victim.id;
+    const live = this.state === MATCH_STATE.LIVE;
+    let promoted = false;
     if (!selfKill) {
       attacker.kills++;
       attacker.streak++;
-      if (this.state === MATCH_STATE.LIVE) this.scores[attacker.team]++;
+      // Team deathmatch is the only mode where a frag is a point on the board.
+      // Domination scores off the control point; the free-for-all modes score
+      // per player and read their totals off the roster.
+      if (live && this.mode.scoring === 'kills' && this.mode.teams) this.scores[attacker.team]++;
+      if (live && this.mode.scoring === 'ladder') promoted = this.advanceLadder(attacker);
     }
 
     this.pushEvent({
@@ -577,15 +654,51 @@ export class Room {
       z: round2(victim.z),
     });
     this.rosterDirty = true;
+    if (promoted) {
+      this.pushEvent({ e: EV.PROMOTE, id: attacker.id, name: attacker.name, hero: attacker.hero.id, stage: attacker.stage });
+    }
+    this.checkWin();
+  }
 
-    if (this.state === MATCH_STATE.LIVE && this.scores.some((s) => s >= SCORE_LIMIT)) {
-      this.endMatch();
+  /**
+   * Gun game: every `killsPerStage` frags moves the killer onto the next hero,
+   * mid-life. Running off the end of the ladder wins the match outright.
+   */
+  advanceLadder(p) {
+    const ladder = this.mode.ladder || Object.keys(HEROES);
+    p.stageKills++;
+    if (p.stageKills < (this.mode.killsPerStage || 2)) return false;
+    if (p.stage + 1 >= ladder.length) {
+      p.stage = ladder.length;
+      p.stageKills = 0;
+      return false; // checkWin() ends the match on the next line up
+    }
+    this.setLadderHero(p, p.stage + 1);
+    return true;
+  }
+
+  /** Ends the match as soon as any mode's win condition is met. */
+  checkWin() {
+    if (this.state !== MATCH_STATE.LIVE) return;
+    if (this.mode.teams) {
+      if (this.scores.some((v) => v >= this.scoreLimit)) this.endMatch();
+      return;
+    }
+    for (const p of this.players.values()) {
+      const done = this.mode.scoring === 'ladder' ? p.stage >= this.scoreLimit : p.kills >= this.scoreLimit;
+      if (done) {
+        this.endMatch(p.id);
+        return;
+      }
     }
   }
 
   // ------------------------------------------------------------- match flow
 
-  endMatch() {
+  endMatch(winnerId = 0) {
+    // Free-for-all modes always name a winner, even on the clock: whoever is
+    // ahead when time runs out takes it.
+    this.winnerId = winnerId || (this.ffa ? this.leader()?.id || 0 : 0);
     this.state = MATCH_STATE.OVER;
     this.stateEndsAt = Date.now() + POST_MATCH_MS;
     this.broadcast(this.matchInfo());
@@ -594,11 +707,14 @@ export class Room {
   /** Wipes the scoreboard and puts everyone back at spawn for a fresh match. */
   resetMatch() {
     this.scores = [0, 0];
+    this.zoneCarry = 0;
+    this.winnerId = 0;
     for (const p of this.players.values()) {
       p.kills = 0;
       p.deaths = 0;
       p.damage = 0;
       p.streak = 0;
+      if (this.mode.scoring === 'ladder') this.setLadderHero(p, 0);
       p.alive = false;
       p.respawnAt = Date.now() + 500;
       p.autoSpawnAt = p.respawnAt;
@@ -657,7 +773,7 @@ export class Room {
         if (!ready) this.setState(MATCH_STATE.WAITING, 0);
         else if (now >= this.stateEndsAt) {
           this.resetMatch();
-          this.setState(MATCH_STATE.LIVE, MATCH_DURATION_MS);
+          this.setState(MATCH_STATE.LIVE, this.mode.duration);
         }
         break;
 
@@ -743,6 +859,8 @@ export class Room {
       while (p.history.length > 2 && now - p.history[0].t > HISTORY_MS) p.history.shift();
     }
 
+    if (this.mode.scoring === 'zone') this.updateZone(dt);
+
     // Snapshots at a lower rate than the simulation.
     this.snapAccumulator += 1;
     if (this.snapAccumulator >= TICK_RATE / SNAPSHOT_RATE) {
@@ -754,6 +872,39 @@ export class Room {
     if (this.rosterDirty && this.tick % 12 === 0) {
       this.rosterDirty = false;
       this.broadcast(this.matchInfo());
+    }
+  }
+
+  /**
+   * Domination: the team alone inside the control point banks points every
+   * second, a little faster with bodies to spare. With both teams inside the
+   * point is contested and nobody scores.
+   */
+  updateZone(dt) {
+    const z = this.zone;
+    if (!z) return;
+    const counts = [0, 0];
+    for (const p of this.players.values()) {
+      if (!p.alive) continue;
+      if (Math.hypot(p.x - z.x, p.z - z.z) > z.r) continue;
+      if (p.y < z.y0 || p.y > z.y1) continue;
+      counts[p.team]++;
+    }
+
+    const contested = counts[0] > 0 && counts[1] > 0;
+    const owner = contested ? -1 : counts[0] > 0 ? 0 : counts[1] > 0 ? 1 : -1;
+    if (owner !== this.zoneState.owner || contested !== this.zoneState.contested) this.rosterDirty = true;
+    this.zoneState = { owner, contested, counts };
+
+    if (this.state !== MATCH_STATE.LIVE || owner < 0) return;
+    const bonus = Math.min(this.mode.maxTickBonus ?? 0, (counts[owner] - 1) * (this.mode.tickPerExtraPlayer ?? 0));
+    this.zoneCarry += ((this.mode.tickPerSecond ?? 1) + bonus) * dt;
+    if (this.zoneCarry >= 1) {
+      const gained = Math.floor(this.zoneCarry);
+      this.zoneCarry -= gained;
+      this.scores[owner] += gained;
+      this.rosterDirty = true;
+      this.checkWin();
     }
   }
 
@@ -784,8 +935,11 @@ export class Room {
 
     // Team-wide reveal from the marksman ability.
     const revealed = [false, false];
+    const soloRevealed = new Set();
     for (const p of this.players.values()) {
-      if (p.hero.id === 'marksman' && p.abilityUntil > now && p.alive) revealed[p.team] = true;
+      if (p.hero.id !== 'marksman' || p.abilityUntil <= now || !p.alive) continue;
+      if (this.ffa) soloRevealed.add(p.id);
+      else revealed[p.team] = true;
     }
 
     for (const p of this.players.values()) {
@@ -796,7 +950,11 @@ export class Room {
         k: this.tick,
         ts: now,
         ack: p.ackSeq,
-        rev: revealed[p.team] ? 1 : 0,
+        rev: (this.ffa ? soloRevealed.has(p.id) : revealed[p.team]) ? 1 : 0,
+        // Live control-point state; only domination fills this in.
+        zn: this.mode.scoring === 'zone'
+          ? [this.zoneState.owner, this.zoneState.contested ? 1 : 0, this.zoneState.counts[0], this.zoneState.counts[1], this.scores[0], this.scores[1]]
+          : null,
         me: {
           x: p.x,
           y: p.y,
@@ -818,12 +976,20 @@ export class Room {
           sp: p.spread,
           inv: now < p.invulnUntil ? 1 : 0,
           hero: p.heroId,
+          lvl: p.stage,
+          lk: p.stageKills,
         },
         ps: others,
         ev: this.events,
       });
     }
   }
+}
+
+/** Resolves a requested map id, honouring the "random" pick from the menu. */
+function pickMapId(id) {
+  if (id === 'random') return randomMapId();
+  return isMapId(id) ? id : DEFAULT_MAP;
 }
 
 function clampRoomSize(v) {

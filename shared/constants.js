@@ -102,6 +102,7 @@ export const EV = {
   ABILITY: 'abil',
   CHAT: 'chat',
   RELOAD: 'reload',
+  PROMOTE: 'promote',
 };
 
 // Fewest players an early start is allowed with.

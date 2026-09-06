@@ -218,8 +218,39 @@ function mergeBoxes(boxes, texScale) {
 
 /* ─────────────────────────────────── stage ───────────────────────────── */
 
+const DEFAULT_THEME = {
+  exposure: 0.92,
+  sky: { top: 0x2f6bb5, mid: 0x7fb0e0, bottom: 0xf6d3a6 },
+  fog: { color: 0x18283d, near: 70, far: 280 },
+  sun: { color: 0xfff2dc, intensity: 1.45, pos: [58, 96, 44] },
+  hemi: { sky: 0xbcd7ff, ground: 0x3f4a5e, intensity: 0.35 },
+  palette: {
+    ground: '#5b6474', groundSeam: '#2f3644',
+    wall: '#6e7686', wallSeam: '#3a4150',
+    building: '#59657c', buildingLine: '#39424f', buildingAccent: '#9fb4d0',
+    pillar: '#4d586d', pillarLine: '#2f3846', pillarAccent: '#c3d3e8',
+  },
+};
+
+/** Fills in anything a map's theme leaves out. */
+function mergeTheme(theme) {
+  const t = theme || {};
+  return {
+    exposure: t.exposure ?? DEFAULT_THEME.exposure,
+    sky: { ...DEFAULT_THEME.sky, ...(t.sky || {}) },
+    fog: { ...DEFAULT_THEME.fog, ...(t.fog || {}) },
+    sun: { ...DEFAULT_THEME.sun, ...(t.sun || {}) },
+    hemi: { ...DEFAULT_THEME.hemi, ...(t.hemi || {}) },
+    palette: { ...DEFAULT_THEME.palette, ...(t.palette || {}) },
+  };
+}
+
 export class Stage {
   constructor(canvas, opts = {}) {
+    // Each arena carries its own sky, sun and material palette, so the same
+    // renderer produces a noon desert or a sodium-lit foundry unchanged.
+    const theme = mergeTheme(opts.theme);
+    this.theme = theme;
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: true,
@@ -234,10 +265,10 @@ export class Stage {
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.92;
+    this.renderer.toneMappingExposure = theme.exposure;
 
     this.scene = new THREE.Scene();
-    this.scene.fog = new THREE.Fog(0x18283d, 70, 280);
+    this.scene.fog = new THREE.Fog(theme.fog.color, theme.fog.near, theme.fog.far);
 
     this.camera = new THREE.PerspectiveCamera(opts.fov ?? 90, 2, 0.06, 600);
     this.camera.rotation.order = 'YXZ';
@@ -262,10 +293,10 @@ export class Stage {
 
     // A prefiltered sky gives every metal surface something to reflect.
     this.scene.environment = buildEnvironment(this.renderer, {
-      top: 0x2f6bb5,
-      mid: 0x7fb0e0,
-      bottom: 0xf6d3a6,
-      sunDir: new THREE.Vector3(58, 96, 44),
+      top: theme.sky.top,
+      mid: theme.sky.mid,
+      bottom: theme.sky.bottom,
+      sunDir: new THREE.Vector3(...theme.sun.pos),
     });
     // The view model gets a neutral dome of its own rather than the sky. Gun
     // metal is a mirror at these roughnesses, and it is always seen from above,
@@ -288,19 +319,20 @@ export class Stage {
   }
 
   addLights() {
+    const theme = this.theme;
     // With an environment map doing the ambient work, the fill lights can come
     // down a long way — otherwise everything washes out flat.
-    const hemi = new THREE.HemisphereLight(0xbcd7ff, 0x3f4a5e, 0.35);
+    const hemi = new THREE.HemisphereLight(theme.hemi.sky, theme.hemi.ground, theme.hemi.intensity);
     this.scene.add(hemi);
-    this.scene.add(new THREE.AmbientLight(0x8fa8c8, 0.12));
+    this.scene.add(new THREE.AmbientLight(theme.hemi.sky, 0.12));
 
-    const sun = new THREE.DirectionalLight(0xfff2dc, 1.45);
-    sun.position.set(58, 96, 44);
+    const sun = new THREE.DirectionalLight(theme.sun.color, theme.sun.intensity);
+    sun.position.set(...theme.sun.pos);
     sun.castShadow = true;
     const shadowRes = this.mobile ? 1024 : 2048;
     sun.shadow.mapSize.set(shadowRes, shadowRes);
     sun.shadow.radius = this.mobile ? 1 : 2.5;
-    const s = 62;
+    const s = 62; // replaced per-map in buildLevel() once the arena size is known
     sun.shadow.camera.left = -s;
     sun.shadow.camera.right = s;
     sun.shadow.camera.top = s;
@@ -313,8 +345,8 @@ export class Stage {
     this.sun = sun;
 
     // Bounce light from the opposite side so shadowed faces are readable.
-    const fill = new THREE.DirectionalLight(0x7fa6ff, 0.25);
-    fill.position.set(-50, 40, -60);
+    const fill = new THREE.DirectionalLight(theme.hemi.sky, 0.25);
+    fill.position.set(-theme.sun.pos[0] * 0.85, theme.sun.pos[1] * 0.45, -theme.sun.pos[2] * 1.3);
     this.scene.add(fill);
   }
 
@@ -325,9 +357,9 @@ export class Stage {
       depthWrite: false,
       fog: false,
       uniforms: {
-        top: { value: new THREE.Color(0x2f6bb5) },
-        mid: { value: new THREE.Color(0x7fb0e0) },
-        bottom: { value: new THREE.Color(0xf6d3a6) },
+        top: { value: new THREE.Color(this.theme.sky.top) },
+        mid: { value: new THREE.Color(this.theme.sky.mid) },
+        bottom: { value: new THREE.Color(this.theme.sky.bottom) },
       },
       vertexShader: `
         varying float vH;
@@ -354,15 +386,23 @@ export class Stage {
 
   buildLevel(map) {
     const K = MAP_KINDS;
+    const c = this.theme.palette;
     const groups = {
-      [K.GROUND]: { tex: concreteTexture('#5b6474', '#2f3644'), scale: 0.18, rough: 0.95 },
-      [K.WALL]: { tex: concreteTexture('#6e7686', '#3a4150'), scale: 0.22, rough: 0.9 },
-      [K.BUILDING]: { tex: panelTexture('#59657c', '#39424f', '#9fb4d0'), scale: 0.25, rough: 0.7, metal: 0.15 },
+      [K.GROUND]: { tex: concreteTexture(c.ground, c.groundSeam), scale: 0.18, rough: 0.95 },
+      [K.WALL]: { tex: concreteTexture(c.wall, c.wallSeam), scale: 0.22, rough: 0.9 },
+      [K.BUILDING]: { tex: panelTexture(c.building, c.buildingLine, c.buildingAccent), scale: 0.25, rough: 0.7, metal: 0.15 },
       [K.PLATFORM]: { tex: grateTexture(), scale: 0.3, rough: 0.55, metal: 0.2 },
       [K.CRATE]: { tex: crateTexture(), scale: 0.42, rough: 0.85 },
       [K.STEP]: { tex: stepTexture(), scale: 0.42, rough: 0.9 },
-      [K.PILLAR]: { tex: panelTexture('#4d586d', '#2f3846', '#c3d3e8'), scale: 0.3, rough: 0.6, metal: 0.15 },
+      [K.PILLAR]: { tex: panelTexture(c.pillar, c.pillarLine, c.pillarAccent), scale: 0.3, rough: 0.6, metal: 0.15 },
     };
+
+    // A bigger arena needs a wider shadow frustum or the far half goes unlit.
+    this.sun.shadow.camera.left = -(map.half + 12);
+    this.sun.shadow.camera.right = map.half + 12;
+    this.sun.shadow.camera.top = map.half + 12;
+    this.sun.shadow.camera.bottom = -(map.half + 12);
+    this.sun.shadow.camera.updateProjectionMatrix();
 
     const level = new THREE.Group();
     level.name = 'level';
@@ -402,6 +442,46 @@ export class Stage {
     this.scene.add(level);
     this.level = level;
     return level;
+  }
+
+  /**
+   * Domination's control point, drawn in the world so it can be found without
+   * looking at the minimap: a floor disc plus a waist-high ring of light.
+   */
+  addZoneMarker(zone) {
+    const group = new THREE.Group();
+    group.position.set(zone.x, 0, zone.z);
+
+    const disc = new THREE.Mesh(
+      new THREE.RingGeometry(zone.r - 0.35, zone.r, 64),
+      new THREE.MeshBasicMaterial({ color: 0xe2e8f0, transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    disc.rotation.x = -Math.PI / 2;
+    disc.position.y = 0.06;
+    disc.renderOrder = 2;
+    group.add(disc);
+
+    const wall = new THREE.Mesh(
+      new THREE.CylinderGeometry(zone.r, zone.r, 2.2, 48, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0xe2e8f0, transparent: true, opacity: 0.1, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    wall.position.y = 1.1;
+    wall.renderOrder = 2;
+    group.add(wall);
+
+    this.scene.add(group);
+    this.zoneMarker = {
+      group,
+      /** @param color three.js colour of the holding team, or null when free. */
+      setOwner(color, contested) {
+        const c = color ?? 0xe2e8f0;
+        disc.material.color.setHex(c);
+        wall.material.color.setHex(c);
+        disc.material.opacity = contested ? 0.95 : 0.7;
+        wall.material.opacity = contested ? 0.2 : 0.1;
+      },
+    };
+    return this.zoneMarker;
   }
 
   setShadows(on) {

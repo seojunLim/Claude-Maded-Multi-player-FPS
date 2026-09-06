@@ -1,7 +1,10 @@
 // Menu, settings and boot sequence.
 
-import { HEROES } from '/shared/heroes.js';
+import { HEROES, getHero } from '/shared/heroes.js';
 import { ROOM_SIZE_MIN, ROOM_SIZE_MAX, ROOM_SIZE_DEFAULT } from '/shared/constants.js';
+import { MODE_LIST, getMode, isModeId, DEFAULT_MODE } from '/shared/modes.js';
+import { MAP_LIST, getMapMeta, isMapId, DEFAULT_MAP, buildMap } from '/shared/map.js';
+import { startMenuBackdrop } from './menufx.js';
 import { Net } from './net.js';
 import { Input } from './input.js';
 import { Sfx } from './audio.js';
@@ -10,7 +13,7 @@ import { Game } from './game.js';
 import { TouchControls, looksLikeTouchDevice, hasTouchSupport } from './touch.js';
 
 const $ = (id) => document.getElementById(id);
-const STORE = 'sanctum.settings.v2';
+const STORE = 'sanctum.settings.v3';
 
 // Phones and tablets start with on-screen controls, a narrower field of view
 // and cheaper rendering. Anything with a mouse starts in mouse mode; a device
@@ -28,6 +31,9 @@ const defaults = {
   shadows: !TOUCH_DEVICE,
   autoFire: true,
   size: ROOM_SIZE_DEFAULT,
+  mode: DEFAULT_MODE,
+  // 'random' asks the server to roll a map when it opens the room.
+  map: DEFAULT_MAP,
   // Not user facing: tells the renderer to use a mobile budget.
   mobile: TOUCH_DEVICE,
 };
@@ -48,6 +54,185 @@ function saveSettings() {
   } catch {
     /* private mode — settings just won't persist */
   }
+}
+
+/* ------------------------------------------------------- mode & map picks */
+
+// "무작위" is a real option rather than a client-side coin flip: the server
+// rolls the map when it opens the room, so everyone who joins agrees.
+const RANDOM_MAP = {
+  id: 'random',
+  name: '무작위',
+  tagline: '서버가 고릅니다',
+  size: '—',
+  desc: '매치가 열릴 때 서버가 전장을 무작위로 고릅니다. 같은 매치에 들어온 모두가 같은 맵을 받습니다.',
+};
+
+function modeCard(mode) {
+  const el = document.createElement('button');
+  el.className = 'pick mode';
+  el.type = 'button';
+  el.dataset.mode = mode.id;
+  el.innerHTML = `
+    <span class="pick-icon">${mode.icon}</span>
+    <span class="pick-tag">${escapeHtml(mode.short)}</span>
+    <h4>${escapeHtml(mode.name)}</h4>
+    <em>${escapeHtml(mode.tagline)}</em>
+    <p>${escapeHtml(mode.desc)}</p>
+    <ul>${mode.rules.map((r) => `<li>${escapeHtml(r)}</li>`).join('')}</ul>`;
+  return el;
+}
+
+function mapCard(meta) {
+  const el = document.createElement('button');
+  el.className = 'pick map';
+  el.type = 'button';
+  el.dataset.map = meta.id;
+  el.appendChild(mapThumb(meta));
+  const body = document.createElement('div');
+  body.className = 'pick-body';
+  body.innerHTML = `
+    <span class="pick-tag">${escapeHtml(meta.size)}</span>
+    <h4>${escapeHtml(meta.name)}</h4>
+    <em>${escapeHtml(meta.tagline)}</em>
+    <p>${escapeHtml(meta.desc)}</p>`;
+  el.appendChild(body);
+  return el;
+}
+
+/**
+ * A top-down thumbnail drawn from the arena's own collision boxes, so the
+ * preview can never drift away from the level people actually play.
+ */
+function mapThumb(meta) {
+  const size = 168;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  c.className = 'thumb';
+  const g = c.getContext('2d');
+  const theme = meta.theme || {};
+  const sky = theme.sky || {};
+  g.fillStyle = `#${(sky.mid ?? 0x1a2436).toString(16).padStart(6, '0')}`;
+  g.globalAlpha = 0.25;
+  g.fillRect(0, 0, size, size);
+  g.globalAlpha = 1;
+
+  if (meta.id === 'random') {
+    g.fillStyle = 'rgba(226,240,255,0.5)';
+    g.font = 'bold 54px system-ui, sans-serif';
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText('?', size / 2, size / 2 + 2);
+    return c;
+  }
+
+  const map = buildMapPreview(meta.id);
+  const scale = size / (map.half * 2);
+  for (const b of map.boxes) {
+    if (b.max[1] <= 0.25) continue;
+    g.globalAlpha = Math.min(0.9, 0.3 + b.max[1] / 14);
+    g.fillStyle = '#dbeafe';
+    g.fillRect(
+      (b.min[0] + map.half) * scale,
+      (b.min[2] + map.half) * scale,
+      Math.max(1, (b.max[0] - b.min[0]) * scale),
+      Math.max(1, (b.max[2] - b.min[2]) * scale),
+    );
+  }
+  g.globalAlpha = 1;
+  // Spawn ends, so the two halves read at a glance.
+  for (const [i, list] of map.spawns.entries()) {
+    g.fillStyle = i === 0 ? '#38bdf8' : '#fb7185';
+    for (const sp of list) {
+      g.beginPath();
+      g.arc((sp.x + map.half) * scale, (sp.z + map.half) * scale, 2.6, 0, Math.PI * 2);
+      g.fill();
+    }
+  }
+  return c;
+}
+
+// Built once per map and reused: the previews are drawn on every menu open.
+const PREVIEW_CACHE = new Map();
+function buildMapPreview(id) {
+  let m = PREVIEW_CACHE.get(id);
+  if (!m) {
+    m = buildMap(id);
+    PREVIEW_CACHE.set(id, m);
+  }
+  return m;
+}
+
+function renderModes() {
+  const wrap = $('modes');
+  wrap.innerHTML = '';
+  for (const mode of MODE_LIST) wrap.appendChild(modeCard(mode));
+  wrap.addEventListener('click', (e) => {
+    const card = e.target.closest('.pick');
+    if (!card) return;
+    settings.mode = card.dataset.mode;
+    saveSettings();
+    markMode();
+    updateLoadout();
+  });
+  markMode();
+}
+
+function renderMaps() {
+  const wrap = $('maps');
+  wrap.innerHTML = '';
+  for (const meta of [...MAP_LIST, RANDOM_MAP]) wrap.appendChild(mapCard(meta));
+  wrap.addEventListener('click', (e) => {
+    const card = e.target.closest('.pick');
+    if (!card) return;
+    settings.map = card.dataset.map;
+    saveSettings();
+    markMap();
+    updateLoadout();
+  });
+  markMap();
+}
+
+function markMode() {
+  if (!isModeId(settings.mode)) settings.mode = DEFAULT_MODE;
+  for (const card of $('modes').children) card.classList.toggle('on', card.dataset.mode === settings.mode);
+}
+
+function markMap() {
+  if (settings.map !== 'random' && !isMapId(settings.map)) settings.map = DEFAULT_MAP;
+  for (const card of $('maps').children) card.classList.toggle('on', card.dataset.map === settings.map);
+}
+
+/* ------------------------------------------------------------------ tabs */
+
+function bindTabs() {
+  const tabs = $('tabs');
+  tabs.addEventListener('click', (e) => {
+    const btn = e.target.closest('.tab');
+    if (!btn) return;
+    for (const t of tabs.children) t.classList.toggle('on', t === btn);
+    for (const pane of document.querySelectorAll('.pane')) {
+      pane.classList.toggle('on', pane.dataset.pane === btn.dataset.tab);
+    }
+  });
+}
+
+// Set once the menu is bound; the pickers call it so the share link keeps up.
+let shareUpdater = () => {};
+
+/** The right-hand rail always shows exactly what the play button will launch. */
+function updateLoadout() {
+  shareUpdater();
+  const mode = getMode(settings.mode);
+  const map = settings.map === 'random' ? RANDOM_MAP : getMapMeta(settings.map);
+  const hero = getHero(settings.hero);
+  $('lo-mode').textContent = mode.name;
+  $('lo-map').textContent = map.name;
+  $('lo-hero').textContent = `${hero.name} · ${hero.role}`;
+  $('lo-size').textContent = `${settings.size}명`;
+  $('lo-rules').textContent = mode.rules[0];
+  $('launchsummary').innerHTML =
+    `<b>${escapeHtml(mode.name)}</b> · ${escapeHtml(map.name)} · ${escapeHtml(hero.name)} · ${settings.size}명`;
 }
 
 /* ------------------------------------------------------------- hero cards */
@@ -82,6 +267,7 @@ function renderHeroes() {
     settings.hero = card.dataset.hero;
     saveSettings();
     markHero();
+    updateLoadout();
   });
   markHero();
 }
@@ -111,6 +297,7 @@ function renderSizePicker() {
     settings.size = Number(btn.dataset.size);
     saveSettings();
     markSize();
+    updateLoadout();
   });
   markSize();
 }
@@ -174,6 +361,10 @@ async function goImmersive() {
 function bindMenu() {
   const params = new URLSearchParams(location.search);
   const roomParam = params.get('room');
+  // A shared link can carry the whole setup, not just the match code.
+  if (isModeId(params.get('mode'))) settings.mode = params.get('mode');
+  const mapParam = params.get('map');
+  if (mapParam === 'random' || isMapId(mapParam)) settings.map = mapParam;
 
   $('nameinput').value = settings.name;
   $('roominput').value = roomParam || settings.room;
@@ -210,8 +401,10 @@ function bindMenu() {
 
   const updateShare = () => {
     const room = ($('roominput').value || 'sanctum').trim();
-    $('sharelink').textContent = `${location.origin}/?room=${encodeURIComponent(room)}`;
+    const q = new URLSearchParams({ room, mode: settings.mode, map: settings.map });
+    $('sharelink').textContent = `${location.origin}/?${q}`;
   };
+  shareUpdater = updateShare;
   $('roominput').addEventListener('input', updateShare);
   updateShare();
 
@@ -223,6 +416,9 @@ function bindMenu() {
     if (e.key === 'Enter') startGame();
   });
 
+  markMode();
+  markMap();
+  updateLoadout();
   refreshRooms();
   // With no bots to fill seats, finding the other players is the whole game,
   // so the list keeps itself current while the menu is open.
@@ -261,6 +457,7 @@ async function refreshRooms() {
       const full = r.players >= r.size;
       row.innerHTML =
         `<span class="rname">${escapeHtml(r.name)}</span>` +
+        `<span class="rmode">${escapeHtml(r.modeName || '')} · ${escapeHtml(r.mapName || '')}</span>` +
         `<span class="rcount">${r.players}/${r.size}명</span>${bots}` +
         `<span class="rstate">${full ? '정원 초과' : STATE_LABEL[r.state] || ''}</span>`;
       row.disabled = full;
@@ -324,6 +521,10 @@ async function startGame() {
       hero: settings.hero,
       room: settings.room,
       size: settings.size,
+      // Only honoured if this join is what opens the room; an existing match
+      // keeps the rules it was created with, and `welcome` says which.
+      mode: settings.mode,
+      map: settings.map,
     });
 
     game = new Game({ canvas, net, welcome, hud, sfx, input, settings });
@@ -358,6 +559,10 @@ async function startGame() {
   }
 }
 
+renderModes();
+renderMaps();
 renderHeroes();
 renderSizePicker();
+bindTabs();
 bindMenu();
+startMenuBackdrop($('menufx'), { reduced: TOUCH_DEVICE });

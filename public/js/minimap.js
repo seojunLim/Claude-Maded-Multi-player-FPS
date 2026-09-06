@@ -14,10 +14,14 @@ const COLORS = {
 };
 
 export class Minimap {
-  constructor(canvas, map) {
+  constructor(canvas, map, opts = {}) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.map = map;
+    // Free-for-all has no halves to tint, and only domination has a point.
+    this.teams = opts.teams !== false;
+    this.zone = opts.zone || null;
+    this.zoneState = null;
     this.size = canvas.width;
     this.scale = this.size / (map.half * 2);
     this.base = document.createElement('canvas');
@@ -36,7 +40,7 @@ export class Minimap {
     g.fillRect(0, 0, this.size, this.size);
 
     // Team-tinted spawn halves.
-    for (const team of TEAMS) {
+    for (const team of this.teams ? TEAMS : []) {
       const grad = g.createLinearGradient(0, team.id === 0 ? this.size : 0, 0, this.size / 2);
       grad.addColorStop(0, team.cssColor + '2b');
       grad.addColorStop(1, 'transparent');
@@ -57,6 +61,34 @@ export class Minimap {
     g.globalAlpha = 1;
   }
 
+  drawZone(g) {
+    const z = this.zone;
+    const [cx, cz] = this.toPx(z.x, z.z);
+    const r = z.r * this.scale;
+    const st = this.zoneState;
+    const color = st && st.owner >= 0 ? TEAMS[st.owner].cssColor : '#e2e8f0';
+    g.save();
+    g.globalAlpha = st && st.contested ? 0.34 : 0.2;
+    g.fillStyle = color;
+    g.beginPath();
+    g.arc(cx, cz, r, 0, Math.PI * 2);
+    g.fill();
+    g.globalAlpha = 1;
+    g.strokeStyle = color;
+    g.lineWidth = 2;
+    // A dashed ring is the standard "nobody owns this yet" read.
+    g.setLineDash(st && st.contested ? [4, 3] : []);
+    g.beginPath();
+    g.arc(cx, cz, r, 0, Math.PI * 2);
+    g.stroke();
+    g.restore();
+  }
+
+  /** Domination feeds the live control-point state in every snapshot. */
+  setZoneState(state) {
+    this.zoneState = state;
+  }
+
   /**
    * @param view {x,z,yaw,team}
    * @param blips [{x,z,team,alive,self,revealed,ping}]
@@ -66,6 +98,8 @@ export class Minimap {
     const s = this.size;
     g.clearRect(0, 0, s, s);
     g.drawImage(this.base, 0, 0);
+
+    if (this.zone) this.drawZone(g);
 
     // View cone.
     const [px, pz] = this.toPx(view.x, view.z);
