@@ -5,9 +5,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { Room } from '../server/room.js';
-import { MATCH_STATE, PLAYER_HEIGHT } from '../shared/constants.js';
+import { MATCH_STATE, PLAYER_HEIGHT, ROOM_SIZE_MIN, ROOM_SIZE_MAX } from '../shared/constants.js';
 import { MAP_IDS, MAPS, buildMap, isMapId } from '../shared/map.js';
-import { MODES, MODE_IDS, getMode } from '../shared/modes.js';
+import { MODES, MODE_IDS, getMode, recommendedSize } from '../shared/modes.js';
 import { makeWorld, isBlocked } from '../shared/physics.js';
 
 // Every room starts a 60Hz interval, so each test reclaims the ones it opened
@@ -49,6 +49,37 @@ test('every map builds a playable arena', (t) => {
       assert.ok(!isBlocked(world, s.x, 0.2, s.z, PLAYER_HEIGHT), `${id} spawn ${s.x},${s.z} is inside geometry`);
     }
   }
+});
+
+test('every map has a preview anchor with room for the menu camera to orbit', (t) => {
+  for (const id of MAP_IDS) {
+    const map = buildMap(id);
+    const world = makeWorld(map);
+    const a = map.preview;
+    assert.ok(a, `${id} has no preview anchor`);
+    assert.ok(!isBlocked(world, a.x, 0.2, a.z, PLAYER_HEIGHT), `${id} preview anchor is inside geometry`);
+    // The main screen orbits the soldier at this radius; anything in the ring
+    // would put the camera inside a wall for part of every lap.
+    for (let i = 0; i < 24; i++) {
+      const t2 = (i / 24) * Math.PI * 2;
+      const x = a.x + Math.cos(t2) * 4.4;
+      const z = a.z + Math.sin(t2) * 4.4;
+      assert.ok(!isBlocked(world, x, 0.2, z, PLAYER_HEIGHT), `${id} preview orbit clips geometry at ${x},${z}`);
+    }
+  }
+});
+
+test('every mode names a roster the room can actually hold', (t) => {
+  for (const id of MODE_IDS) {
+    const n = recommendedSize(id);
+    assert.ok(Number.isInteger(n), `${id} recommends a non-integer size`);
+    assert.ok(n >= ROOM_SIZE_MIN && n <= ROOM_SIZE_MAX, `${id} recommends ${n}, outside the room limits`);
+    assert.ok(MODES[id].sizeNote, `${id} has no explanation for its roster`);
+    // A room opened at that size must accept it unchanged.
+    assert.equal(makeRoom(t, { mode: id, size: n }).size, n);
+  }
+  // Free-for-all modes want a fuller lobby than the two-team ones.
+  assert.ok(recommendedSize('ffa') >= recommendedSize('tdm'));
 });
 
 test('map ids round-trip and unknown ids fall back instead of throwing', (t) => {

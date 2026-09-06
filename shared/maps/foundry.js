@@ -16,6 +16,7 @@ export const meta = {
   size: '소형',
   half: HALF,
   wallHeight: 16,
+  preview: { x: 0, z: 26 },
   zone: { x: 0, z: 0, r: 9, y0: -1, y1: 12, name: '용광로' },
   theme: {
     exposure: 0.92,
@@ -130,5 +131,5 @@ export function build() {
     { x: -20, z: -14, yaw: 0 },
   ];
 
-  return { id: meta.id, name: meta.name, half, boxes, spawns, freeSpawns, zone: meta.zone, theme: meta.theme };
+  return { id: meta.id, name: meta.name, half, boxes, spawns, freeSpawns, preview: meta.preview, zone: meta.zone, theme: meta.theme };
 }

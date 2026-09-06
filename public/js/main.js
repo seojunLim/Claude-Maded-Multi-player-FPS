@@ -2,9 +2,10 @@
 
 import { HEROES, getHero } from '/shared/heroes.js';
 import { ROOM_SIZE_MIN, ROOM_SIZE_MAX, ROOM_SIZE_DEFAULT } from '/shared/constants.js';
-import { MODE_LIST, getMode, isModeId, DEFAULT_MODE } from '/shared/modes.js';
+import { MODE_LIST, getMode, isModeId, DEFAULT_MODE, recommendedSize } from '/shared/modes.js';
 import { MAP_LIST, getMapMeta, isMapId, DEFAULT_MAP, buildMap } from '/shared/map.js';
 import { startMenuBackdrop } from './menufx.js';
+import { tryStartMenuScene } from './menuscene.js';
 import { Net } from './net.js';
 import { Input } from './input.js';
 import { Sfx } from './audio.js';
@@ -38,7 +39,11 @@ const defaults = {
   mobile: TOUCH_DEVICE,
 };
 
-const settings = Object.assign(defaults, loadSettings(), { mobile: TOUCH_DEVICE });
+const stored = loadSettings();
+const settings = Object.assign(defaults, stored, { mobile: TOUCH_DEVICE });
+// A player who has never touched the size picker gets whatever their mode is
+// tuned for rather than the bare minimum.
+if (stored.size === undefined) settings.size = recommendedSize(settings.mode);
 
 function loadSettings() {
   try {
@@ -68,18 +73,27 @@ const RANDOM_MAP = {
   desc: '매치가 열릴 때 서버가 전장을 무작위로 고릅니다. 같은 매치에 들어온 모두가 같은 맵을 받습니다.',
 };
 
-function modeCard(mode) {
+// Mode accent colours. They drive the tile, its glow and the briefing rule,
+// so each mode reads as its own thing at a glance.
+const MODE_COLOR = {
+  tdm: '#38bdf8',
+  ffa: '#fb7185',
+  domination: '#5eead4',
+  gungame: '#fbbf24',
+};
+
+function modeTile(mode) {
   const el = document.createElement('button');
-  el.className = 'pick mode';
+  el.className = 'tile';
   el.type = 'button';
   el.dataset.mode = mode.id;
+  el.style.setProperty('--mc', MODE_COLOR[mode.id] || '#38bdf8');
   el.innerHTML = `
-    <span class="pick-icon">${mode.icon}</span>
-    <span class="pick-tag">${escapeHtml(mode.short)}</span>
-    <h4>${escapeHtml(mode.name)}</h4>
-    <em>${escapeHtml(mode.tagline)}</em>
-    <p>${escapeHtml(mode.desc)}</p>
-    <ul>${mode.rules.map((r) => `<li>${escapeHtml(r)}</li>`).join('')}</ul>`;
+    <span class="tile-short">${escapeHtml(mode.short)}</span>
+    <span class="tile-icon">${mode.icon}</span>
+    <h3>${escapeHtml(mode.name)}</h3>
+    <p>${escapeHtml(mode.tagline)}</p>
+    <span class="tile-size">${recommendedSize(mode.id)}인 권장</span>`;
   return el;
 }
 
@@ -166,16 +180,44 @@ function buildMapPreview(id) {
 function renderModes() {
   const wrap = $('modes');
   wrap.innerHTML = '';
-  for (const mode of MODE_LIST) wrap.appendChild(modeCard(mode));
+  for (const mode of MODE_LIST) wrap.appendChild(modeTile(mode));
   wrap.addEventListener('click', (e) => {
-    const card = e.target.closest('.pick');
-    if (!card) return;
-    settings.mode = card.dataset.mode;
-    saveSettings();
-    markMode();
-    updateLoadout();
+    const tile = e.target.closest('.tile');
+    if (!tile) return;
+    pickMode(tile.dataset.mode);
   });
   markMode();
+}
+
+/**
+ * Picking a mode also sets the match size to the roster that mode is tuned
+ * for — the whole point of choosing "개인전" is a full lobby, and nobody should
+ * have to know that. The size buttons stay live for anyone who disagrees.
+ */
+function pickMode(id, { setSize = true } = {}) {
+  settings.mode = isModeId(id) ? id : DEFAULT_MODE;
+  if (setSize) {
+    const want = recommendedSize(settings.mode);
+    const moved = want !== settings.size;
+    settings.size = want;
+    markSize();
+    if (moved) flashSize();
+  }
+  saveSettings();
+  markMode();
+  updateLoadout();
+}
+
+/** Draws attention to the size slot when a mode pick just changed it. */
+function flashSize() {
+  const slot = document.querySelector('.sizeslot');
+  if (!slot) return;
+  slot.classList.remove('auto');
+  // Reading offsetWidth restarts the transition when two picks land quickly.
+  void slot.offsetWidth;
+  slot.classList.add('auto');
+  clearTimeout(flashSize.timer);
+  flashSize.timer = setTimeout(() => slot.classList.remove('auto'), 1400);
 }
 
 function renderMaps() {
@@ -189,13 +231,29 @@ function renderMaps() {
     saveSettings();
     markMap();
     updateLoadout();
+    closeSheet();
   });
   markMap();
 }
 
 function markMode() {
   if (!isModeId(settings.mode)) settings.mode = DEFAULT_MODE;
-  for (const card of $('modes').children) card.classList.toggle('on', card.dataset.mode === settings.mode);
+  for (const tile of $('modes').children) tile.classList.toggle('on', tile.dataset.mode === settings.mode);
+  renderBrief();
+}
+
+/** The rules panel for whichever mode is selected. */
+function renderBrief() {
+  const mode = getMode(settings.mode);
+  const el = $('modebrief');
+  el.style.setProperty('--mc', MODE_COLOR[mode.id] || '#38bdf8');
+  el.innerHTML = `
+    <h3>${escapeHtml(mode.name)}</h3>
+    <p class="tagline">${escapeHtml(mode.tagline)}</p>
+    <p>${escapeHtml(mode.desc)}</p>
+    <ul>${mode.rules.map((r) => `<li>${escapeHtml(r)}</li>`).join('')}
+      <li>권장 인원 <b>${recommendedSize(mode.id)}명</b> — ${escapeHtml(mode.sizeNote || '')}</li>
+    </ul>`;
 }
 
 function markMap() {
@@ -203,36 +261,63 @@ function markMap() {
   for (const card of $('maps').children) card.classList.toggle('on', card.dataset.map === settings.map);
 }
 
-/* ------------------------------------------------------------------ tabs */
+/* ---------------------------------------------------------------- sheets */
 
-function bindTabs() {
-  const tabs = $('tabs');
-  tabs.addEventListener('click', (e) => {
-    const btn = e.target.closest('.tab');
-    if (!btn) return;
-    for (const t of tabs.children) t.classList.toggle('on', t === btn);
-    for (const pane of document.querySelectorAll('.pane')) {
-      pane.classList.toggle('on', pane.dataset.pane === btn.dataset.tab);
-    }
+/** Slots along the bottom bar open a full-screen sheet; Esc closes it. */
+function bindSheets() {
+  for (const btn of document.querySelectorAll('[data-open]')) {
+    btn.addEventListener('click', () => openSheet(btn.dataset.open));
+  }
+  for (const sheet of document.querySelectorAll('.sheet')) {
+    sheet.addEventListener('click', (e) => {
+      // Click the backdrop or the ✕, not the panel itself.
+      if (e.target === sheet || e.target.closest('.sheet-close')) closeSheet();
+    });
+  }
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !$('menu').classList.contains('hidden')) closeSheet();
   });
+}
+
+function openSheet(name) {
+  for (const sheet of document.querySelectorAll('.sheet')) {
+    sheet.classList.toggle('hidden', sheet.dataset.sheet !== name);
+  }
+  if (name === 'rooms') refreshRooms();
+  if (name === 'setup') $('nameinput').focus();
+}
+
+function closeSheet() {
+  for (const sheet of document.querySelectorAll('.sheet')) sheet.classList.add('hidden');
 }
 
 // Set once the menu is bound; the pickers call it so the share link keeps up.
 let shareUpdater = () => {};
 
-/** The right-hand rail always shows exactly what the play button will launch. */
+/** The bottom bar always shows exactly what the play button will launch. */
 function updateLoadout() {
   shareUpdater();
   const mode = getMode(settings.mode);
   const map = settings.map === 'random' ? RANDOM_MAP : getMapMeta(settings.map);
   const hero = getHero(settings.hero);
-  $('lo-mode').textContent = mode.name;
-  $('lo-map').textContent = map.name;
-  $('lo-hero').textContent = `${hero.name} · ${hero.role}`;
-  $('lo-size').textContent = `${settings.size}명`;
-  $('lo-rules').textContent = mode.rules[0];
+
+  $('slot-hero').textContent = hero.name;
+  $('slot-herorole').textContent = hero.role;
+  $('slot-map').textContent = map.name;
+  $('slot-mapsize').textContent = map.size;
+  const thumb = $('slot-mapthumb');
+  thumb.innerHTML = '';
+  thumb.appendChild(mapThumb(map));
+  $('callsigntag').textContent = settings.name || 'RECRUIT';
   $('launchsummary').innerHTML =
     `<b>${escapeHtml(mode.name)}</b> · ${escapeHtml(map.name)} · ${escapeHtml(hero.name)} · ${settings.size}명`;
+
+  // Keep the live backdrop on whatever is selected. A random map has nothing
+  // specific to show, so the preview just stays on the last real one.
+  if (menuScene) {
+    if (settings.map !== 'random') menuScene.setMap(settings.map);
+    menuScene.setHero(settings.hero);
+  }
 }
 
 /* ------------------------------------------------------------- hero cards */
@@ -268,6 +353,7 @@ function renderHeroes() {
     saveSettings();
     markHero();
     updateLoadout();
+    closeSheet();
   });
   markHero();
 }
@@ -288,7 +374,7 @@ function renderSizePicker() {
     b.className = 'sizebtn';
     b.type = 'button';
     b.dataset.size = String(n);
-    b.textContent = `${n}명`;
+    b.textContent = String(n);
     wrap.appendChild(b);
   }
   wrap.addEventListener('click', (e) => {
@@ -306,12 +392,17 @@ function markSize() {
   for (const b of $('sizebtns').children) {
     b.classList.toggle('on', Number(b.dataset.size) === settings.size);
   }
+  const mode = getMode(settings.mode);
+  if (settings.size === recommendedSize(mode.id)) {
+    $('sizenote').textContent = `${mode.name} 권장 인원`;
+    return;
+  }
   // The size only applies to a match this player creates; an existing room
   // keeps whatever it was opened with.
   $('sizenote').textContent =
     settings.size === ROOM_SIZE_MIN
-      ? `${settings.size}명이 모이면 바로 시작합니다`
-      : `${settings.size}명이 모이면 시작합니다 · 인원이 덜 모여도 대기 화면에서 바로 시작할 수 있습니다`;
+      ? '2명이 모이면 바로 시작'
+      : `${settings.size}명이 모이면 시작 · 덜 모여도 바로 시작 가능`;
 }
 
 /* --------------------------------------------------------------- controls */
@@ -362,9 +453,17 @@ function bindMenu() {
   const params = new URLSearchParams(location.search);
   const roomParam = params.get('room');
   // A shared link can carry the whole setup, not just the match code.
-  if (isModeId(params.get('mode'))) settings.mode = params.get('mode');
+  if (isModeId(params.get('mode'))) {
+    // A link that names a mode brings its roster along, unless it says otherwise.
+    settings.mode = params.get('mode');
+    settings.size = recommendedSize(settings.mode);
+  }
   const mapParam = params.get('map');
   if (mapParam === 'random' || isMapId(mapParam)) settings.map = mapParam;
+  const sizeParam = Number(params.get('size'));
+  if (Number.isFinite(sizeParam) && sizeParam >= ROOM_SIZE_MIN && sizeParam <= ROOM_SIZE_MAX) {
+    settings.size = Math.round(sizeParam);
+  }
 
   $('nameinput').value = settings.name;
   $('roominput').value = roomParam || settings.room;
@@ -401,7 +500,7 @@ function bindMenu() {
 
   const updateShare = () => {
     const room = ($('roominput').value || 'sanctum').trim();
-    const q = new URLSearchParams({ room, mode: settings.mode, map: settings.map });
+    const q = new URLSearchParams({ room, mode: settings.mode, map: settings.map, size: String(settings.size) });
     $('sharelink').textContent = `${location.origin}/?${q}`;
   };
   shareUpdater = updateShare;
@@ -409,6 +508,9 @@ function bindMenu() {
   updateShare();
 
   $('play').addEventListener('click', () => startGame());
+  $('nameinput').addEventListener('input', () => {
+    $('callsigntag').textContent = $('nameinput').value.trim() || 'RECRUIT';
+  });
   $('nameinput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') startGame();
   });
@@ -440,7 +542,8 @@ async function refreshRooms() {
     const s = await (await fetch('/api/status')).json();
     const rooms = s.rooms.filter((r) => r.players > 0).sort((a, b) => b.players - a.players);
     const total = s.rooms.reduce((n, r) => n + r.players, 0);
-    $('serverinfo').textContent = `서버 정상 · 접속자 ${total}명 · 진행 중인 매치 ${rooms.length}개`;
+    $('serverinfo').textContent = `서버 정상 · 접속자 ${total}명`;
+    $('slot-rooms').textContent = rooms.length;
 
     if (!rooms.length) {
       list.innerHTML =
@@ -464,6 +567,7 @@ async function refreshRooms() {
       row.addEventListener('click', () => {
         $('roominput').value = r.name;
         $('roominput').dispatchEvent(new Event('input'));
+        closeSheet();
         startGame();
       });
       list.appendChild(row);
@@ -494,6 +598,13 @@ async function startGame() {
 
   const sfx = new Sfx();
   sfx.init(); // must happen inside the click handler
+
+  // One WebGL context at a time: the preview hands the GPU to the match.
+  if (menuScene) {
+    menuScene.dispose();
+    menuScene = null;
+    $('menuscene').classList.add('hidden');
+  }
 
   const canvas = $('scene');
   const net = new Net();
@@ -559,10 +670,24 @@ async function startGame() {
   }
 }
 
+// The main screen's backdrop is the real renderer showing the real arena. If
+// this browser will not give us a WebGL context for it, fall back to the 2D
+// one rather than leaving the screen flat.
+let menuScene = tryStartMenuScene($('menuscene'), { mobile: TOUCH_DEVICE });
+if (menuScene) {
+  menuScene.setMap(settings.map === 'random' ? DEFAULT_MAP : settings.map);
+  menuScene.setHero(settings.hero);
+  menuScene.start();
+  window.__menuScene = menuScene; // handy for debugging from the console
+} else {
+  $('menuscene').classList.add('hidden');
+  $('menufx').classList.remove('hidden');
+  startMenuBackdrop($('menufx'), { reduced: TOUCH_DEVICE });
+}
+
 renderModes();
 renderMaps();
 renderHeroes();
 renderSizePicker();
-bindTabs();
+bindSheets();
 bindMenu();
-startMenuBackdrop($('menufx'), { reduced: TOUCH_DEVICE });

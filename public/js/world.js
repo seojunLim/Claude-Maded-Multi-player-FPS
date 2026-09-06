@@ -324,7 +324,9 @@ export class Stage {
     // down a long way — otherwise everything washes out flat.
     const hemi = new THREE.HemisphereLight(theme.hemi.sky, theme.hemi.ground, theme.hemi.intensity);
     this.scene.add(hemi);
-    this.scene.add(new THREE.AmbientLight(theme.hemi.sky, 0.12));
+    this.hemi = hemi;
+    this.ambient = new THREE.AmbientLight(theme.hemi.sky, 0.12);
+    this.scene.add(this.ambient);
 
     const sun = new THREE.DirectionalLight(theme.sun.color, theme.sun.intensity);
     sun.position.set(...theme.sun.pos);
@@ -348,6 +350,7 @@ export class Stage {
     const fill = new THREE.DirectionalLight(theme.hemi.sky, 0.25);
     fill.position.set(-theme.sun.pos[0] * 0.85, theme.sun.pos[1] * 0.45, -theme.sun.pos[2] * 1.3);
     this.scene.add(fill);
+    this.fill = fill;
   }
 
   addSky() {
@@ -382,6 +385,7 @@ export class Stage {
     const sky = new THREE.Mesh(geo, mat);
     sky.frustumCulled = false;
     this.scene.add(sky);
+    this.sky = sky;
   }
 
   buildLevel(map) {
@@ -482,6 +486,67 @@ export class Stage {
       },
     };
     return this.zoneMarker;
+  }
+
+  /**
+   * Repaints the whole stage in another arena's theme. The menu preview flips
+   * between maps without tearing down the WebGL context, so everything the
+   * constructor set from the theme has to be settable again here.
+   */
+  applyTheme(theme) {
+    const t = mergeTheme(theme);
+    this.theme = t;
+    this.renderer.toneMappingExposure = t.exposure;
+    this.scene.fog.color.setHex(t.fog.color);
+    this.scene.fog.near = t.fog.near;
+    this.scene.fog.far = t.fog.far;
+
+    this.sky.material.uniforms.top.value.setHex(t.sky.top);
+    this.sky.material.uniforms.mid.value.setHex(t.sky.mid);
+    this.sky.material.uniforms.bottom.value.setHex(t.sky.bottom);
+
+    this.scene.environment?.dispose();
+    this.scene.environment = buildEnvironment(this.renderer, {
+      top: t.sky.top,
+      mid: t.sky.mid,
+      bottom: t.sky.bottom,
+      sunDir: new THREE.Vector3(...t.sun.pos),
+    });
+
+    this.hemi.color.setHex(t.hemi.sky);
+    this.hemi.groundColor.setHex(t.hemi.ground);
+    this.hemi.intensity = t.hemi.intensity;
+    this.ambient.color.setHex(t.hemi.sky);
+    this.sun.color.setHex(t.sun.color);
+    this.sun.intensity = t.sun.intensity;
+    this.sun.position.set(...t.sun.pos);
+    this.fill.color.setHex(t.hemi.sky);
+    this.fill.position.set(-t.sun.pos[0] * 0.85, t.sun.pos[1] * 0.45, -t.sun.pos[2] * 1.3);
+  }
+
+  /** Drops the current arena and everything it allocated. */
+  clearLevel() {
+    if (!this.level) return;
+    this.scene.remove(this.level);
+    this.level.traverse((o) => {
+      if (!o.isMesh) return;
+      o.geometry.dispose();
+      for (const mat of Array.isArray(o.material) ? o.material : [o.material]) {
+        mat.map?.dispose();
+        mat.dispose();
+      }
+    });
+    this.level = null;
+  }
+
+  /** Releases the WebGL context — the menu preview does this before a match. */
+  dispose() {
+    this.clearLevel();
+    this.scene.environment?.dispose();
+    this.weaponScene.environment?.dispose();
+    this.sky.geometry.dispose();
+    this.sky.material.dispose();
+    this.renderer.dispose();
   }
 
   setShadows(on) {

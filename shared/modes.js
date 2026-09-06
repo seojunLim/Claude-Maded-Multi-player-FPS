@@ -2,13 +2,17 @@
 // decide who can shoot whom, what puts points on the board and when a match
 // is won. Served to the browser as an ES module, so keep it dependency free.
 
-import { MATCH_DURATION_MS } from './constants.js';
+import { MATCH_DURATION_MS, ROOM_SIZE_MIN, ROOM_SIZE_MAX } from './constants.js';
 
 /**
  * scoring
  *   'kills' — a frag is a point (team total in team modes, personal in FFA)
  *   'zone'  — only holding the control point scores
  *   'ladder'— every N frags promotes you to the next hero; finishing wins
+ *
+ * `size` is the roster the mode is tuned for. Picking a mode in the menu sets
+ * the match size to it, so nobody has to work out that a free-for-all wants a
+ * full lobby and a two-team brawl plays fine as a duel.
  */
 export const MODES = {
   tdm: {
@@ -20,6 +24,8 @@ export const MODES = {
     scoring: 'kills',
     scoreLimit: 50,
     duration: MATCH_DURATION_MS,
+    size: 4,
+    sizeNote: '2:2로 붙는 팀전 기본 인원',
     tagline: '먼저 50킬',
     desc: '두 팀이 처치 수를 겨룹니다. 가장 기본적이고 가장 치열한 규칙.',
     rules: ['팀 전체 처치 수가 곧 점수', '먼저 50점을 올린 팀이 승리', '제한 시간 8분'],
@@ -33,6 +39,8 @@ export const MODES = {
     scoring: 'kills',
     scoreLimit: 25,
     duration: MATCH_DURATION_MS,
+    size: 6,
+    sizeNote: '난전이 끊기지 않는 최대 인원',
     tagline: '전원 적',
     desc: '팀이 없습니다. 눈에 보이는 모두가 적이고, 점수는 오직 자신의 것입니다.',
     rules: ['모든 플레이어가 서로의 적', '개인 처치 수 25킬 선착순 승리', '리스폰 지점은 맵 전역에 분산'],
@@ -46,6 +54,8 @@ export const MODES = {
     scoring: 'zone',
     scoreLimit: 200,
     duration: MATCH_DURATION_MS,
+    size: 6,
+    sizeNote: '거점을 두고 3:3으로 밀고 당기는 인원',
     // Points per second for the team holding the point, plus a bonus per
     // extra body inside it (capped so a full stack cannot end it instantly).
     tickPerSecond: 2,
@@ -62,6 +72,8 @@ export const MODES = {
     icon: '⇪',
     teams: false,
     scoring: 'ladder',
+    size: 4,
+    sizeNote: '래더를 끝까지 오를 수 있는 인원',
     killsPerStage: 2,
     // Rungs of the ladder, climbed in order. Every promotion swaps the hero
     // (and therefore the weapon) mid-life, so it reads as a real gun game.
@@ -76,6 +88,12 @@ export const MODES = {
 export const MODE_IDS = Object.keys(MODES);
 export const MODE_LIST = Object.values(MODES);
 export const DEFAULT_MODE = 'tdm';
+
+/** The roster a mode is tuned for, clamped to what a room can actually hold. */
+export function recommendedSize(id) {
+  const n = getMode(id).size ?? ROOM_SIZE_MIN;
+  return Math.max(ROOM_SIZE_MIN, Math.min(ROOM_SIZE_MAX, n));
+}
 
 export function isModeId(id) {
   return Object.prototype.hasOwnProperty.call(MODES, id);

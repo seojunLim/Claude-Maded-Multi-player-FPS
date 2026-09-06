@@ -17,6 +17,9 @@ export const meta = {
   half: HALF,
   wallHeight: 14,
   // Domination's control point: the raised centre platform.
+  // Where the main screen stands your soldier: open ground looking in at the
+  // arena's centrepiece.
+  preview: { x: 12, z: 17 },
   zone: { x: 0, z: 0, r: 10, y0: -1, y1: 9, name: '중앙 고지' },
   theme: {
     exposure: 0.92,
@@ -134,5 +137,5 @@ export function build() {
     { x: 25, z: 17, yaw: Math.PI },
   ];
 
-  return { id: meta.id, name: meta.name, half, boxes, spawns, freeSpawns, zone: meta.zone, theme: meta.theme };
+  return { id: meta.id, name: meta.name, half, boxes, spawns, freeSpawns, preview: meta.preview, zone: meta.zone, theme: meta.theme };
 }

@@ -165,155 +165,169 @@
       <p>화면을 <b>가로</b>로 돌려주세요</p>
     </div>
 
-    <!-- ───────────────────────────── 메뉴 ───────────────────────────── -->
+    <!-- ───────────────────────────── 메인 화면 ───────────────────────────── -->
     <div id="menu">
-      <!-- 배경: 애니메이션 캔버스 + 격자/스캔라인 오버레이 -->
-      <canvas id="menufx"></canvas>
-      <div class="menu-veil"></div>
+      <!-- 배경: 선택한 전장에 서 있는 실시간 3D 미리보기 (실패 시 2D 폴백) -->
+      <canvas id="menuscene"></canvas>
+      <canvas id="menufx" class="hidden"></canvas>
+      <div class="menu-scrim"></div>
 
-      <div class="menu-shell">
-        <header class="brand">
-          <div class="mark" aria-hidden="true">
-            <svg viewBox="0 0 48 48">
-              <circle cx="24" cy="24" r="19" />
-              <circle cx="24" cy="24" r="7" />
-              <path d="M24 1v11M24 36v11M1 24h11M36 24h11" />
-            </svg>
-          </div>
-          <div class="brandtext">
-            <h1>SANCTUM</h1>
-            <p class="sub">브라우저에서 바로 즐기는 <b>실시간 멀티플레이 FPS</b></p>
-          </div>
-          <div class="brandstat">
-            <span class="dot"></span><span id="serverinfo">서버 상태 확인 중…</span>
-          </div>
-        </header>
+      <header class="mtop">
+        <div class="mlogo">
+          <svg viewBox="0 0 48 48" aria-hidden="true">
+            <circle cx="24" cy="24" r="19" />
+            <circle cx="24" cy="24" r="7" />
+            <path d="M24 1v11M24 36v11M1 24h11M36 24h11" />
+          </svg>
+          <span>SANCTUM</span>
+        </div>
 
-        <main class="deck">
-          <section class="deck-main">
-            <nav class="tabs" id="tabs" role="tablist">
-              <button type="button" class="tab on" data-tab="mode" role="tab">모드</button>
-              <button type="button" class="tab" data-tab="map" role="tab">맵</button>
-              <button type="button" class="tab" data-tab="hero" role="tab">영웅</button>
-              <button type="button" class="tab" data-tab="setup" role="tab">설정 · 조작</button>
-            </nav>
+        <button type="button" class="callsign" data-open="setup">
+          <i>콜사인</i><b id="callsigntag">RECRUIT</b>
+        </button>
 
-            <div class="panes">
-              <div class="pane on" data-pane="mode">
-                <h2 class="section">게임 모드</h2>
-                <div id="modes" class="cardgrid"></div>
-              </div>
+        <div class="mtop-right">
+          <div class="brandstat"><span class="dot"></span><span id="serverinfo">서버 상태 확인 중…</span></div>
+          <button type="button" class="iconbtn" data-open="setup" aria-label="설정">⚙</button>
+        </div>
+      </header>
 
-              <div class="pane" data-pane="map">
-                <h2 class="section">전장</h2>
-                <div id="maps" class="cardgrid"></div>
-              </div>
+      <section class="modestrip">
+        <div class="striphead">
+          <h2>게임 모드</h2>
+          <p>모드를 고르면 그 모드에 맞는 인원으로 자동 설정됩니다</p>
+        </div>
+        <div id="modes" class="tiles"></div>
+      </section>
 
-              <div class="pane" data-pane="hero">
-                <h2 class="section">영웅 선택</h2>
-                <div id="heroes"></div>
-              </div>
+      <section class="briefing">
+        <div id="modebrief"></div>
+      </section>
 
-              <div class="pane" data-pane="setup">
-                <h2 class="section">매치 설정</h2>
-                <div class="row">
-                  <label>
-                    <span>콜사인</span>
-                    <input id="nameinput" maxlength="14" placeholder="RECRUIT" autocomplete="off" />
-                  </label>
-                  <label>
-                    <span>매치 코드</span>
-                    <input id="roominput" maxlength="20" placeholder="sanctum" autocomplete="off" />
-                  </label>
-                </div>
+      <footer class="mbottom">
+        <button type="button" class="slot heroslot" data-open="hero">
+          <span class="slotlabel">영웅</span>
+          <b id="slot-hero">RANGER</b>
+          <em id="slot-herorole">Assault</em>
+        </button>
 
-                <label class="sizepick">
-                  <span>매치 인원</span>
-                  <div id="sizebtns" role="group" aria-label="매치 인원"></div>
-                  <em id="sizenote">2명이 모이면 바로 시작합니다</em>
-                </label>
+        <button type="button" class="slot mapslot" data-open="map">
+          <span class="slotlabel">전장</span>
+          <b id="slot-map">SANCTUM</b>
+          <em id="slot-mapsize">중형</em>
+          <div id="slot-mapthumb"></div>
+        </button>
 
-                <h2 class="section">조준 · 화면</h2>
-                <div class="row settings">
-                  <label class="slider" id="senswrap">
-                    <span><i class="sens-label">마우스 감도</i> <b id="sensval">1.00</b></span>
-                    <input id="sens" type="range" min="0.2" max="3" step="0.05" value="1" />
-                  </label>
-                  <label class="slider">
-                    <span>시야각(FOV) <b id="fovval">90</b></span>
-                    <input id="fov" type="range" min="70" max="110" step="1" value="90" />
-                  </label>
-                  <label class="check"><input id="invertY" type="checkbox" /><span>Y축 반전</span></label>
-                  <label class="check"><input id="shadows" type="checkbox" checked /><span>그림자</span></label>
-                  <label class="check touch-only"><input id="autofire" type="checkbox" checked /><span>자동 사격</span></label>
-                </div>
-
-                <div class="cols">
-                  <div class="card">
-                    <h3>조작</h3>
-                    <ul class="keys" id="keyhelp-pc">
-                      <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 이동</li>
-                      <li><kbd>Shift</kbd> 달리기 · <kbd>Ctrl</kbd> 앉기 · <kbd>Space</kbd> 점프</li>
-                      <li><kbd>좌클릭</kbd> 사격 · <kbd>우클릭</kbd> 조준 · <kbd>R</kbd> 재장전</li>
-                      <li><kbd>Q</kbd> 영웅 스킬 · <kbd>Tab</kbd> 스코어보드</li>
-                      <li><kbd>Enter</kbd> 채팅 · <kbd>Esc</kbd> 마우스 해제</li>
-                      <li><kbd>F</kbd> 인원이 덜 모였을 때 경기 시작</li>
-                    </ul>
-                    <ul class="keys hidden" id="keyhelp-touch">
-                      <li><b>왼쪽 스틱</b> 이동 — 끝까지 밀면 달리기</li>
-                      <li><b>화면 드래그</b> 조준 · <b>화면 탭</b> 단발 사격</li>
-                      <li><b>발사 / 조준 / 점프</b> 오른쪽 버튼</li>
-                      <li><b>장전 · 스킬 · 앉기</b> 오른쪽 아래 버튼</li>
-                      <li><b>순위 · 채팅</b> 왼쪽 위 버튼</li>
-                      <li>대기 중 <b>지금 시작</b> 버튼으로 바로 경기 시작</li>
-                      <li>조준 보정과 자동 사격이 켜져 있습니다</li>
-                    </ul>
-                  </div>
-                  <div class="card">
-                    <h3>공통 규칙</h3>
-                    <ul class="keys">
-                      <li>헤드샷은 무기에 따라 <b>1.5~2.2배</b> 피해.</li>
-                      <li>사망 후 <b>5초</b> 뒤 부활.</li>
-                      <li>서버가 모든 판정을 처리하고 <b>지연 보상</b>을 적용합니다.</li>
-                      <li>봇은 없습니다 — <b>사람 2명 이상</b>이 모여야 경기가 시작됩니다.</li>
-                      <li>매치가 이미 열려 있으면 그 매치의 모드와 맵을 따릅니다.</li>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <aside class="rail">
-            <div class="railcard loadout">
-              <h3>출격 준비</h3>
-              <dl id="loadout">
-                <div><dt>모드</dt><dd id="lo-mode">—</dd></div>
-                <div><dt>전장</dt><dd id="lo-map">—</dd></div>
-                <div><dt>영웅</dt><dd id="lo-hero">—</dd></div>
-                <div><dt>인원</dt><dd id="lo-size">—</dd></div>
-              </dl>
-              <p class="small" id="lo-rules"></p>
-            </div>
-
-            <div class="railcard">
-              <h3>진행 중인 매치</h3>
-              <div id="roomlist"><p class="small">불러오는 중…</p></div>
-            </div>
-
-            <div class="railcard">
-              <h3>친구 초대</h3>
-              <p class="small">같은 <b>매치 코드</b>를 쓰거나 아래 주소를 공유하세요.</p>
-              <div id="sharelink"></div>
-            </div>
-          </aside>
-        </main>
-
-        <footer class="launch">
-          <div class="launchsummary" id="launchsummary">모드와 전장을 고르고 전투에 참가하세요</div>
+        <div class="playwrap">
           <button id="play">전투 참가</button>
+          <div class="launchsummary" id="launchsummary"></div>
           <div id="menustatus" role="status"></div>
-        </footer>
+        </div>
+
+        <div class="slot sizeslot">
+          <span class="slotlabel">매치 인원</span>
+          <div id="sizebtns" role="group" aria-label="매치 인원"></div>
+          <em id="sizenote"></em>
+        </div>
+
+        <button type="button" class="slot roomslot" data-open="rooms">
+          <span class="slotlabel">진행 중인 매치</span>
+          <b id="slot-rooms">0</b>
+          <em>눌러서 참가</em>
+        </button>
+      </footer>
+
+      <!-- ─────────────── 슬롯에서 열리는 시트 ─────────────── -->
+      <div class="sheet hidden" data-sheet="map">
+        <div class="sheet-inner">
+          <div class="sheet-head"><h2>전장 선택</h2><button type="button" class="sheet-close" aria-label="닫기">✕</button></div>
+          <div class="sheet-body"><div id="maps" class="cardgrid"></div></div>
+        </div>
+      </div>
+
+      <div class="sheet hidden" data-sheet="hero">
+        <div class="sheet-inner">
+          <div class="sheet-head"><h2>영웅 선택</h2><button type="button" class="sheet-close" aria-label="닫기">✕</button></div>
+          <div class="sheet-body"><div id="heroes"></div></div>
+        </div>
+      </div>
+
+      <div class="sheet hidden" data-sheet="rooms">
+        <div class="sheet-inner narrow">
+          <div class="sheet-head"><h2>진행 중인 매치</h2><button type="button" class="sheet-close" aria-label="닫기">✕</button></div>
+          <div class="sheet-body">
+            <div id="roomlist"><p class="small">불러오는 중…</p></div>
+            <h3 class="sheet-sub">친구 초대</h3>
+            <p class="small">같은 <b>매치 코드</b>를 쓰거나 아래 주소를 공유하세요.</p>
+            <div id="sharelink"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sheet hidden" data-sheet="setup">
+        <div class="sheet-inner">
+          <div class="sheet-head"><h2>설정 · 조작</h2><button type="button" class="sheet-close" aria-label="닫기">✕</button></div>
+          <div class="sheet-body">
+            <div class="row">
+              <label>
+                <span>콜사인</span>
+                <input id="nameinput" maxlength="14" placeholder="RECRUIT" autocomplete="off" />
+              </label>
+              <label>
+                <span>매치 코드</span>
+                <input id="roominput" maxlength="20" placeholder="sanctum" autocomplete="off" />
+              </label>
+            </div>
+
+            <h2 class="section">조준 · 화면</h2>
+            <div class="row settings">
+              <label class="slider" id="senswrap">
+                <span><i class="sens-label">마우스 감도</i> <b id="sensval">1.00</b></span>
+                <input id="sens" type="range" min="0.2" max="3" step="0.05" value="1" />
+              </label>
+              <label class="slider">
+                <span>시야각(FOV) <b id="fovval">90</b></span>
+                <input id="fov" type="range" min="70" max="110" step="1" value="90" />
+              </label>
+              <label class="check"><input id="invertY" type="checkbox" /><span>Y축 반전</span></label>
+              <label class="check"><input id="shadows" type="checkbox" checked /><span>그림자</span></label>
+              <label class="check touch-only"><input id="autofire" type="checkbox" checked /><span>자동 사격</span></label>
+            </div>
+
+            <div class="cols">
+              <div class="card">
+                <h3>조작</h3>
+                <ul class="keys" id="keyhelp-pc">
+                  <li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 이동</li>
+                  <li><kbd>Shift</kbd> 달리기 · <kbd>Ctrl</kbd> 앉기 · <kbd>Space</kbd> 점프</li>
+                  <li><kbd>좌클릭</kbd> 사격 · <kbd>우클릭</kbd> 조준 · <kbd>R</kbd> 재장전</li>
+                  <li><kbd>Q</kbd> 영웅 스킬 · <kbd>Tab</kbd> 스코어보드</li>
+                  <li><kbd>Enter</kbd> 채팅 · <kbd>Esc</kbd> 마우스 해제</li>
+                  <li><kbd>F</kbd> 인원이 덜 모였을 때 경기 시작</li>
+                </ul>
+                <ul class="keys hidden" id="keyhelp-touch">
+                  <li><b>왼쪽 스틱</b> 이동 — 끝까지 밀면 달리기</li>
+                  <li><b>화면 드래그</b> 조준 · <b>화면 탭</b> 단발 사격</li>
+                  <li><b>발사 / 조준 / 점프</b> 오른쪽 버튼</li>
+                  <li><b>장전 · 스킬 · 앉기</b> 오른쪽 아래 버튼</li>
+                  <li><b>순위 · 채팅</b> 왼쪽 위 버튼</li>
+                  <li>대기 중 <b>지금 시작</b> 버튼으로 바로 경기 시작</li>
+                  <li>조준 보정과 자동 사격이 켜져 있습니다</li>
+                </ul>
+              </div>
+              <div class="card">
+                <h3>공통 규칙</h3>
+                <ul class="keys">
+                  <li>헤드샷은 무기에 따라 <b>1.5~2.2배</b> 피해.</li>
+                  <li>사망 후 <b>5초</b> 뒤 부활.</li>
+                  <li>서버가 모든 판정을 처리하고 <b>지연 보상</b>을 적용합니다.</li>
+                  <li>봇은 없습니다 — <b>사람 2명 이상</b>이 모여야 경기가 시작됩니다.</li>
+                  <li>매치가 이미 열려 있으면 그 매치의 모드와 맵을 따릅니다.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
