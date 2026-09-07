@@ -3,15 +3,89 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>SANCTUM — 멀티플레이 온라인 FPS</title>
-    <meta name="description" content="브라우저에서 바로 즐기는 실시간 멀티플레이 FPS. 게임 모드 4종, 전장 4종, 영웅 4종." />
+    <title>SANCTUM — 브라우저 멀티플레이 온라인 FPS</title>
+    <meta name="description" content="설치 없이 브라우저에서 바로 즐기는 실시간 멀티플레이 3D FPS. 팀 데스매치·개인전·거점 점령·건 게임 4가지 모드와 4개의 전장, 4종의 영웅. 주소만 공유하면 친구와 바로 같이 플레이할 수 있습니다." />
+
+    <!-- 검색 엔진이 매치 코드/모드/맵 쿼리가 붙은 주소를 전부 별개 문서로 세지
+         않도록, 모든 변형을 대표 주소 하나로 모읍니다. %ORIGIN% 은 서버가 요청
+         호스트로 치환합니다 (server/index.js). -->
+    <link rel="canonical" href="%ORIGIN%/" />
+
+    <!-- 카카오톡·디스코드·트위터 등에 링크를 붙였을 때 뜨는 미리보기 카드 -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="SANCTUM" />
+    <meta property="og:locale" content="ko_KR" />
+    <meta property="og:title" content="SANCTUM — 브라우저 멀티플레이 온라인 FPS" />
+    <meta property="og:description" content="설치 없이 브라우저에서 바로. 4가지 모드, 4개의 전장, 4종의 영웅으로 친구와 실시간 팀 대전." />
+    <meta property="og:url" content="%ORIGIN%/" />
+    <meta property="og:image" content="%ORIGIN%/og.jpg" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="SANCTUM 메인 화면 — 모드 선택 타일과 전장에 서 있는 병사" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="SANCTUM — 브라우저 멀티플레이 온라인 FPS" />
+    <meta name="twitter:description" content="설치 없이 브라우저에서 바로. 4가지 모드, 4개의 전장, 4종의 영웅으로 친구와 실시간 팀 대전." />
+    <meta name="twitter:image" content="%ORIGIN%/og.jpg" />
+
     <link rel="stylesheet" href="/css/style.css" />
+    <!-- With scripting off the canvas and the menu shell are dead furniture;
+         hide them so the fallback below is the whole page. -->
+    <noscript><style>#scene, #menu, #hud, #loading, #rotate { display: none !important; }</style></noscript>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%2338bdf8' stroke-width='2'/%3E%3Cpath d='M16 3v8M16 21v8M3 16h8M21 16h8' stroke='%2338bdf8' stroke-width='2'/%3E%3C/svg%3E" />
     <script type="importmap">
       { "imports": { "three": "/vendor/three/three.module.min.js" } }
     </script>
   </head>
   <body>
+    <noscript>
+      <div id="nojs">
+        <h1>SANCTUM — 브라우저 멀티플레이 온라인 FPS</h1>
+        <p>
+          <b>이 게임은 자바스크립트와 WebGL이 필요합니다.</b> 브라우저에서 자바스크립트를
+          켜신 뒤 새로고침하면 바로 플레이할 수 있습니다. 설치할 것도, 계정을 만들 것도
+          없습니다.
+        </p>
+        <p>
+          SANCTUM은 설치 없이 브라우저에서 바로 즐기는 실시간 멀티플레이 3D FPS입니다.
+          서버가 60Hz로 모든 판정을 처리하고 지연 보상을 적용하며, 같은
+          <b>매치 코드</b>를 입력하거나 초대 링크를 공유하면 친구와 같은 경기에서
+          만납니다. 봇은 없고 사람 2명 이상이 모이면 경기가 시작됩니다.
+        </p>
+
+        <h2>게임 모드 4종</h2>
+        <ul>
+          <li><b>팀 데스매치</b> — 두 팀(LUMEN / EMBER)이 처치 수를 겨루고, 먼저 50킬을 올린 팀이 승리합니다. 권장 인원 4명.</li>
+          <li><b>개인전</b> — 팀이 없습니다. 눈에 보이는 모두가 적이고 개인 처치 수 25킬 선착순으로 승리합니다. 권장 인원 6명.</li>
+          <li><b>거점 점령</b> — 맵 중앙의 거점을 점거한 팀만 초당 점수를 얻습니다. 처치 수는 점수가 되지 않고, 먼저 200점을 올린 팀이 승리합니다. 권장 인원 6명.</li>
+          <li><b>건 게임</b> — 2킬마다 다음 영웅으로 자동 승급하고, 마지막 영웅까지 끝낸 사람이 승리합니다. 권장 인원 4명.</li>
+        </ul>
+
+        <h2>전장 4종</h2>
+        <ul>
+          <li><b>SANCTUM</b> (중형) — 중앙 고지대를 두고 두 팀이 정면으로 부딪히는 표준 대칭 맵.</li>
+          <li><b>FOUNDRY</b> (소형) — 좁은 통로와 2층 캣워크가 겹치는 실내 산업 지대. 근접 교전에 유리합니다.</li>
+          <li><b>DUNE</b> (대형) — 긴 사선과 높은 감시탑의 사막 야외 맵. 저격수의 무대입니다.</li>
+          <li><b>NEXUS</b> (소형) — 네 방향이 모두 대칭인 야간 아레나. 개인전에 가장 잘 어울립니다.</li>
+        </ul>
+
+        <h2>영웅 4종</h2>
+        <ul>
+          <li><b>RANGER</b> (Assault, 체력 150) — 자동소총 AR-15 PULSE. 스킬 SURGE로 이동 속도가 28% 오르고 재장전이 빨라집니다.</li>
+          <li><b>SENTINEL</b> (Tank, 체력 260) — 9펠릿 산탄총 BREACHER-12. 스킬 BULWARK로 5초간 피해를 55% 흡수합니다.</li>
+          <li><b>MARKSMAN</b> (Sniper, 체력 130) — 볼트액션 저격총 LONGVIEW .338. 스킬 RECON으로 5초간 적을 벽 너머로 감지합니다.</li>
+          <li><b>MEDIC</b> (Support, 체력 160) — 기관단총 VESPER SMG. 스킬 MEND PULSE로 주변 아군을 즉시 회복시킵니다.</li>
+        </ul>
+
+        <h2>조작</h2>
+        <p>
+          PC에서는 <b>WASD</b>로 이동하고 마우스로 조준하며, 좌클릭 사격 · 우클릭 조준 ·
+          <b>R</b> 재장전 · <b>Q</b> 영웅 스킬 · <b>Shift</b> 달리기 · <b>Ctrl</b> 앉기 ·
+          <b>Space</b> 점프를 사용합니다. 휴대폰과 태블릿에서는 화면에 조작 버튼과
+          아날로그 스틱이 나타납니다.
+        </p>
+      </div>
+    </noscript>
+
     <canvas id="scene"></canvas>
 
     <!-- ────────────────────────────── HUD ────────────────────────────── -->

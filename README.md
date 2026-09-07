@@ -154,7 +154,7 @@ shared/      클라이언트와 서버가 함께 쓰는 코드 (여기가 desync
   heroes.js     영웅·무기·스킬 수치
 
 server/
-  index.js      정적 파일 서빙 + WebSocket 접속 처리
+  index.js      정적 파일 서빙 + WebSocket 접속 처리 + robots.txt / sitemap.xml
   room.js       권위 시뮬레이션, 히트스캔, 지연 보상, 점수/매치 진행
   bot.js        연습용 봇 AI — 기본은 꺼져 있고 BOTS 환경 변수로만 켜집니다
 
@@ -228,6 +228,31 @@ npm test
 다시 복사하려면 `npm run vendor`를 실행하세요.
 
 ---
+
+## 검색 노출 (SEO)
+
+검색 엔진에 필요한 것들이 들어 있습니다.
+
+- **`/robots.txt`, `/sitemap.xml`** — 서버가 요청 호스트로 생성합니다. localhost든
+  Render 주소든 자체 도메인이든 설정 없이 항상 맞는 절대 주소가 나갑니다
+  (Render는 프록시에서 TLS를 끊으므로 `x-forwarded-proto`를 봅니다).
+- **canonical** — `?room=…&mode=…&map=…` 조합 때문에 주소가 무한히 갈라지는데,
+  전부 대표 주소 하나로 모읍니다. 안 그러면 중복 문서로 취급됩니다.
+- **Open Graph / 트위터 카드** — 카카오톡·디스코드 등에 링크를 붙이면
+  `public/og.jpg` 미리보기 카드가 뜹니다.
+- **`<noscript>` 대체 문서** — 자바스크립트를 실행하지 않는 크롤러(네이버 Yeti 등)는
+  WebGL 게임에서 읽을 텍스트가 없습니다. 모드·전장·영웅·조작 설명을 정적 HTML로
+  넣어 두어 색인할 내용이 있게 했고, 실제로 JS를 끈 방문자에게도 같은 문서가
+  읽을 수 있는 형태로 보입니다.
+
+네이버는 [서치어드바이저](https://searchadvisor.naver.com), 구글은
+[Search Console](https://search.google.com/search-console)에 사이트를 등록하고
+사이트맵을 제출하면 됩니다. 소유확인용 `<meta name="naver-site-verification">`
+태그는 발급받은 뒤 `public/index.html`의 `<head>`에 넣으세요.
+
+> ⚠️ 무료 플랜은 15분 무접속 시 슬립되고 콜드스타트에 30~50초가 걸립니다.
+> 크롤러가 그 사이에 오면 수집이 실패할 수 있으니, 검색 노출이 목적이라면
+> 유료 플랜으로 슬립을 없애는 편이 낫습니다.
 
 ## 온라인으로 서비스하기
 
